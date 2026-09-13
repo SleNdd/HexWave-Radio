@@ -2,11 +2,14 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MaroonedSoftware.Deadair.Desktop.Core;
 using MaroonedSoftware.Deadair.Desktop.Core.Auth;
+using MaroonedSoftware.Deadair.Desktop.Core.NowPlaying;
 using MaroonedSoftware.Deadair.Desktop.Core.Playback;
 using MaroonedSoftware.Deadair.Desktop.Core.Plugins;
 using MaroonedSoftware.Deadair.Desktop.Core.Settings;
 using MaroonedSoftware.Deadair.Desktop.Core.Station;
+using MaroonedSoftware.Deadair.Desktop.Services;
 using MaroonedSoftware.Deadair.Desktop.Themes;
 using MaroonedSoftware.Deadair.Sdk;
 using MaroonedSoftware.Deadair.Sdk.Models;
@@ -62,9 +65,25 @@ public sealed partial class SettingsViewModel(
     HttpClient http,
     ISettingsStore settings,
     ThemeManager themes,
-    IPluginCatalog? plugins = null) : ObservableObject
+    IPluginCatalog? plugins = null,
+    AppLog? log = null) : ObservableObject
 {
     private StationUrl _station;
+
+    /// <summary>Whether there is a log file to show, which there is not in a headless render.</summary>
+    public bool CanRevealLog => log?.CanReveal == true;
+
+    /// <summary>Where the log is, said on the page so it can be found without the button too.</summary>
+    public string LogNote => log?.FilePath is { } path
+        ? $"What this app did and what went wrong, kept on this Mac and never sent anywhere: {path}"
+        : "This copy of the app is not keeping a log.";
+
+    /// <remarks>
+    /// On this page rather than the check-up, because the check-up needs an operator and a listener
+    /// with a problem has no account.
+    /// </remarks>
+    [RelayCommand]
+    private void RevealLog() => log?.Reveal();
 
     public ObservableCollection<SettingGroupViewModel> Groups { get; } = [];
 
@@ -101,11 +120,86 @@ public sealed partial class SettingsViewModel(
     [ObservableProperty]
     private bool _nextSkips;
 
+    /// <summary>Whether the app asks GitHub for a newer release when it starts. Saved at once, like the others.</summary>
+    [ObservableProperty]
+    private bool _checkForUpdates = true;
+
+    /// <summary>This build, beside the card's heading, so a notice about a newer one has something to compare with.</summary>
+    public static string Version { get; } = $"VERSION {AppVersion.Current}";
+
     [ObservableProperty]
     private bool _busy;
 
     [ObservableProperty]
     private string? _notice;
+
+    private const string SleepOff =
+        "Stops listening after a while, which also tells the station you have gone. Nothing is set.";
+
+    private bool _applyingSleep;
+
+    /// <summary>The sleep timer's choice in minutes, nought for off.</summary>
+    /// <remarks>
+    /// Chosen here and kept by the listener, which owns the only stop. Nothing about it is saved:
+    /// a timer set last night must not stop tonight's listening.
+    /// </remarks>
+    [ObservableProperty]
+    private int _sleepMinutes;
+
+    /// <summary>When it will stop, or what it is for while nothing is set.</summary>
+    [ObservableProperty]
+    private string _sleepNote = SleepOff;
+
+    /// <summary>Raised with the time chosen, or null for off.</summary>
+    public event Action<TimeSpan?>? SleepRequested;
+
+    /// <summary>Told when the timer changed, including when it elapsed or a Stop cancelled it.</summary>
+    /// <remarks>
+    /// Setting <see cref="SleepMinutes"/> back to nought here would otherwise ask the listener to
+    /// cancel a timer that has already gone, so it is done under a guard that keeps it quiet.
+    /// </remarks>
+    public void ApplySleep(DateTimeOffset? endsAt)
+    {
+        SleepNote = endsAt is { } at
+            ? $"Stops at {ClockFormat.WallClock(at.ToLocalTime())}."
+            : SleepOff;
+
+        if (endsAt is null && SleepMinutes != 0)
+        {
+            _applyingSleep = true;
+            try
+            {
+                SleepMinutes = 0;
+            }
+            finally
+            {
+                _applyingSleep = false;
+            }
+        }
+    }
+
+    partial void OnSleepMinutesChanged(int value)
+    {
+        if (!_applyingSleep)
+        {
+            SleepRequested?.Invoke(value > 0 ? TimeSpan.FromMinutes(value) : null);
+        }
+    }
+
+    /// <summary>Said when this install's settings file could not be read and is being left alone.</summary>
+    /// <remarks>
+    /// Without it, the failure is invisible in the worst way: every change on this page appears to
+    /// work, and is gone at the next launch. The path is in the sentence because the remedy is to
+    /// open that file.
+    /// </remarks>
+    [ObservableProperty]
+    private string? _settingsProblem;
+
+    /// <summary>The one sentence for a settings file nobody can read, shared with the setup screen.</summary>
+    internal static string? DescribeProblem(SettingsFileProblem? problem) => problem is null
+        ? null
+        : $"Your settings file could not be read, so nothing you change is being saved. Fix or remove it and "
+            + $"start the app again: {problem.Path}";
 
     /// <summary>Every format the station could publish, in the order a listener would try them.</summary>
     public IReadOnlyList<FormatChoiceViewModel> Formats { get; } =
@@ -150,12 +244,36 @@ public sealed partial class SettingsViewModel(
         OnPropertyChanged(nameof(HasPlugins));
     }
 
+    /// <summary>The station this app is pointed at, as its name.</summary>
+    [ObservableProperty]
+    private string _stationName = string.Empty;
+
+    /// <summary>And as its address, which is what somebody changing it needs to see.</summary>
+    [ObservableProperty]
+    private string _stationAddress = string.Empty;
+
+    /// <summary>Forgets the old station's settings, so the next visit fetches the new one's.</summary>
+    /// <remarks>
+    /// The page fetches only while it has no groups, and the formats come from the listener's
+    /// readings, so both would go on describing the old station without this.
+    /// </remarks>
+    public void Reset()
+    {
+        Groups.Clear();
+        ApplyMounts([]);
+        Notice = null;
+    }
+
     public void Attach(StationUrl station)
     {
         _station = station;
+        StationAddress = station.ToString();
+        StationName = settings.Current.StationName ?? station.Origin.Host;
         Appearance = settings.Current.Appearance;
         NextSkips = settings.Current.NextSkips;
+        CheckForUpdates = settings.Current.CheckForUpdates;
         MarkChosenFormat(settings.Current.Format);
+        SettingsProblem = DescribeProblem(settings.Problem);
     }
 
     /// <summary>
@@ -209,6 +327,8 @@ public sealed partial class SettingsViewModel(
     }
 
     partial void OnNextSkipsChanged(bool value) => _ = settings.UpdateAsync(current => current with { NextSkips = value });
+
+    partial void OnCheckForUpdatesChanged(bool value) => _ = settings.UpdateAsync(current => current with { CheckForUpdates = value });
 
     [RelayCommand]
     private async Task LoadAsync(CancellationToken cancellationToken)

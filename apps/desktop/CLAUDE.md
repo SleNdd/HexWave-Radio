@@ -211,11 +211,19 @@ worked example, and its own measurements are in `Plugins: BluOS` below.
 
 **Bundled plugins load through the same path a third-party one does, and that is the point of the
 `BundledPlugin` item in `Directory.Build.targets`.** It becomes a project reference that is built and
-never compiled against, plus a copy of the plugin's whole output under `plugins/<id>/`. If the app
+never compiled against, plus a copy of the plugin's whole output under `plugins/<id>/`, with the
+id's dots written as hyphens (`plugins/deadair-bluos/`). If the app
 could name a type from a plugin it ships, the bundled one would work through a path nothing else uses
 and the third-party path would rot unnoticed. The PUBLISH copy is a second target on purpose: publish
 assembles its own directory and carries nothing the build put in the output one, so without it the
 app bundle ships with no plugins at all — which a successful build does not reveal.
+
+**The folder is hyphenated because codesign reads a dotted directory inside `Contents/MacOS` as a
+nested bundle.** `plugins/deadair.bluos` failed the signed app's strict check with "bundle format
+unrecognized, invalid, or unsuitable". The loader names a plugin from its manifest and never from its
+folder, so the folder is only a location, and it is the same in a build and a publish so the two
+cannot drift. A plugin in the user's plugins directory can be called anything: that folder is not
+inside the signed bundle.
 
 **A plugin csproj needs two properties that look like boilerplate and are not.**
 `EnableDynamicLoading` is the SDK's own switch for a library that is loaded rather than referenced:
@@ -375,6 +383,14 @@ is looking at the answer.
 stopped by the plugin that owns it while that plugin is still there to stop it. The remembered choice
 survives: the app took the plugin away for a moment, the operator did not change their mind.
 
+**Quitting lets go of the speaker too, and for a while it did not.** The container used to be
+disposed in `Program.Main` after the main loop, and on macOS a quit (menu, ⌘Q, Dock, logout) never
+returns from that loop: AppKit calls `exit` from inside Avalonia's shutdown. Found only because the
+new log's `deadair exiting` line never appeared, with an exit code of 0. So the device player's
+dispose, which is the request that stops the speaker, never ran. The disposal now happens in the
+lifetime's `Exit` event, on the pool, waited for with a five-second bound (`App.ReleaseOnExit`).
+Measured that `Exit` runs on a menu quit; NOT yet measured against a speaker that was playing.
+
 **The bar shows the speaker as an ICON and not a name.** The first version drew the name, capped at
 96px, and the 820px frame settled it: the bar is already full at its minimum width and the caption
 pushed the expand button off the end. The icon takes the accent when the station is playing
@@ -385,6 +401,39 @@ speaker is a tooltip away and a click away.
 drop it".** Two things here are unmeasured: whether macOS keeps a Now Playing entry for an app that
 is producing no audio itself, and whether Avalonia's headless renderer can capture a flyout at all
 (the picker is rendered as a control on its own on the assumption that it cannot).
+
+## Closing is not quitting
+
+**Closing the window hides it and the station plays on; only a quit ends the app.** It used to quit,
+Avalonia's default, which stopped the radio for anybody who only wanted the window out of the way.
+`Services/WindowKeeper` sets `ShutdownMode.OnExplicitShutdown`, cancels the person's own close and
+hides instead, and shows the window again on the Dock's reopen. Its one rule,
+`HidesInsteadOfClosing`, is deliberately narrow and tested: every way out of an Avalonia app closes
+the window on its way, so a hide for anything but the person's own close (the app quitting, a
+logout, code) would make the app impossible to quit.
+
+**Dock reopening arrives only for a bundled app.** A `dotnet run` has no bundle identifier for macOS
+to route it to, so under `dotnet run` the menu-bar icon's Show is the way back. Measured against the
+bundle: the close button leaves zero windows and the process running, `open` on the running bundle
+(which is what a Dock click sends) brings the window back where it was, and a quit exits with the
+log's closing line.
+
+**The menu-bar icon is where the station is while the window is away.** What is on air (a disabled
+first item), Listen or Stop, Skip for the operator, Show and Quit. Skip follows the operator gate and
+not `NextSkips`, because that setting exists for a key pressed without looking and a menu item is
+read and chosen; it is the desk's own `SkipCommand`. Two Avalonia 12 facts it cost a build each to
+learn: the template flag is the ATTACHED property `MacOSProperties.IsTemplateIcon`, not a property of
+`TrayIcon`, and a `TrayIcon` needs its own `x:DataType` for a compiled binding even though it binds
+through the Application's DataContext. The icon is 44 pixels, black on transparent, built by
+`make-app-icon.py` with the dark shapes inside the skull cut out so it still reads as one at 22
+points. Check it by asking macOS, status items being `menu bar 2`:
+
+```bash
+osascript -e 'tell application "System Events" to tell process "deadair" to get {name, enabled} of every menu item of menu 1 of menu bar item 1 of menu bar 2'
+```
+
+(click `menu bar item 1 of menu bar 2` first, or the menu has no items to list). Measured: the item
+is 24 by 24 points, and every command is enabled, which is the sign a native command bound.
 
 ## The system's own now-playing display
 
@@ -414,6 +463,16 @@ a progress bar that is confidently wrong is worse than one that is absent.
 request timed out throws away something true and still useful. It is the station's own rule read from
 the other side: a failed reading of the listener count is "could not say", never zero.
 
+**The sleep timer stops the listener and nothing else, and matters more here than in a music app.**
+A connection is an audience to an audience-gated station, so somebody asleep with the app playing
+keeps the station on air for as long as the Mac is awake. `Core/Playback/SleepTimer` is only the
+clock; `ListenerViewModel` owns it because it owns the only stop, and elapsing runs `ToggleAsync`,
+the same Stop a person presses, which drops the connection or asks the speaker to stop. It never
+reaches the station's playout. Any stop cancels it, so every way of stopping leaves the same state.
+It is chosen on the Settings page (the shell carries the choice across, as it does the mounts) and
+saved nowhere: a timer set last night must not stop tonight's listening. The note under it is a
+wall-clock time in the Mac's own 12- or 24-hour convention, so it needs no ticker.
+
 **Settings are tolerant of a bad file, and that hid a real bug once.** `FileSettingsStore` treats an
 unreadable file as an install with no preferences, which is right — the worst case is retyping a
 station address, and refusing to start is worse. But the appearance enum had no string converter, so a
@@ -422,6 +481,56 @@ though it had never been configured, taking the station address with it. Found b
 and noticing it opened no connection. The converter is on the enum now and a test asserts the file
 reads as names; the lesson is that a deliberate catch needs a test proving the ordinary path through
 it works.
+
+**And a file that could not be read is never written over, which the tolerance did not originally
+say.** Starting clean was only half of it; the other half was the first write of the session. A
+volume change, a plugin saving its configuration, anything, wrote the defaults the app had fallen
+back to over the file, and the station address and every plugin's settings went with them. A file
+from a newer build did it on a downgrade. Found by comparing against Sonora, which refuses to write
+a file it could not parse. Now a failed load sets `ISettingsStore.Problem`, changes keep applying in
+memory, the disk is left alone, and both the setup screen and Settings say so with the path. The
+file is deliberately NOT renamed aside: the next launch would then start clean and write defaults,
+the same loss one launch later beside a file nobody will find.
+
+## Changing station
+
+**The app can be pointed at another station without restarting, and until now `AttachAsync` had only
+ever run once per process.** A second attach over the first would have left the transport and
+running-order pollers reading the OLD station with the NEW station's token, the old record and cover
+on screen, and the old catalog in the library forever (each library tab fetches only while empty).
+So `ShellViewModel.SwitchAsync` detaches first: the listener stops through its own Stop (the old
+station hears its audience go), the pollers are disposed, the pages that fetch only while empty are
+emptied, and then it attaches as a first run would. Programme, History, Check-up and Voice fetch on
+every visit and need nothing.
+
+**Work begun for the old station can land after the switch, and is dropped.** A reading the hold
+was about to release and a cover still downloading both carry the attachment they belong to
+(`ListenerViewModel._attachment`, and the cover's own key), and `NowPlayingHold.Reset` empties the
+hold. Without them the old station's next record would appear on the new station's screen a few
+seconds in.
+
+**Asking is not switching.** Change station (Settings) and a `deadair://` link both show the setup
+screen prefilled, with a way back ("Keep the station I have"); nothing is let go of until the new
+address answers and is connected. The same address again just closes the screen. A sign-in is kept
+per station in the Keychain, so switching back finds the operator signed in: `SessionManager` never
+deleted a session for another origin, whatever its comment used to say.
+
+**A `deadair://` link proposes a station; it never switches to one.** `Core/Station/StationLink`
+reads `deadair://connect?station=<escaped origin>`, which is what the console writes and the only
+form that can name a plain-http station on a home network, and `deadair://host[:port]` as https
+shorthand; anything else is refused. The bundle registers the scheme in `Info.plist.in`, macOS
+delivers the link to the running instance (so there is no single-instance code), and
+`WindowKeeper.UriOpened` hands it to `ShellViewModel.OpenStationAsync`, which waits for `StartAsync`
+first because a link that LAUNCHED the app arrives while the settings are still being read. Only a
+registered bundle receives one:
+
+```bash
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f apps/desktop/artifacts/deadair.app
+open "deadair://connect?station=https%3A%2F%2Fradio.example.com"
+```
+
+Measured against the bundle: the same station while running, a different origin while running (it
+offered and switched nothing), and a cold launch from a link each wrote `link: offered` to the log.
 
 ## The session
 
@@ -553,7 +662,16 @@ sets the Application's to the shell for that binding and nothing else — every 
 own. An unbound `Command` leaves a native item DISABLED rather than failing, so a menu item that is
 greyed out is a binding that did not resolve.
 
-**There is still no Edit or Window menu, and that is a known gap rather than an oversight.** ⌘C/⌘V
+**There is a Controls menu and a Window menu, and still no Edit menu.** They are the WINDOW's
+`NativeMenu.Menu` (`MainWindow.axaml`), not the Application's, whose menu is the app menu itself;
+macOS shows them while the window is active. Controls is Listen or Stop and the operator's Skip;
+Window is Minimize (⌘M) and Close (⌘W), and Close HIDES, since closing is not quitting. Listen has no
+key equivalent: AppKit offers every key press to the main menu first, so a bare Space there would
+take the space bar from every text box. Space is handled in `MainWindow.OnKeyDown` behind the same
+text-box and slider guard as the rail letters. Measured: the bar reads Apple, deadair, Controls,
+Window; ⌘W leaves zero windows and the app running.
+
+The Edit menu is still a known gap rather than an oversight. ⌘C/⌘V
 work anyway, because Avalonia's own `PlatformHotkeyConfiguration` handles them inside its text
 controls rather than through AppKit's menu key equivalents — which also means an Edit menu carrying
 those gestures would TAKE them first, so adding one is a change that can break working paste and
@@ -572,6 +690,14 @@ osascript -e 'tell application "System Events" to tell process "deadair" \
 equivalent and `enabled of menu item` to prove a Command bound. This works against a plain
 `dotnet run`, which is a far faster loop than rebuilding the bundle.
 
+**A cover is decoded at the size it is drawn, not the size it arrived.** Row covers go through
+`ArtworkLoader` at 128 pixels wide (rows are 36 units, 72 pixels at 2x) and the playing record's at
+800 (the desk's cover tops out at 400 units). A hotlinked cover is commonly 1000 pixels square and
+sometimes three times that, and the loader keeps 200, so full-size decoding could hold 800 MB of
+pixels to draw thumbnails. The system's Now Playing display still gets the bytes as they arrived.
+Not measured on a long session, and not looked at since the change, because this session cannot
+capture the screen: worth a glance at the desk and History the next time the app is open.
+
 **Icons are `StreamGeometry` in `Themes/Icons.axaml`, keyed by name.** Fluent's Regular 20 set, pasted
 as path data rather than pulled in as a package, because this app draws about twenty icons and a
 package would be a dependency, a licence and a renderer for that. Every one inherits `Foreground`, so
@@ -588,6 +714,16 @@ matched, because Fluent gives the thumb a control theme carrying its own brush. 
 Every row in this app is its own Grid, so a column that collapses when its content is hidden sizes to
 that row alone and the page stops lining up. The same rule is why an `Auto` column cannot align down
 a list.
+
+**The window opens where it was left, if that is still on a screen.** The frame is saved half a
+second after the window stops moving, and read when that save runs rather than when the event fires:
+the first version read it in the event and saved (0, 505) for a window Avalonia was centring at
+(1970, 184). It is restored only if its centre lands on a connected screen's working area, so a
+laptop closed on an external display opens on its own. On macOS a window's position and a screen's
+area are both in points (measured: the saved position matched System Events), so the size is scaled
+by the window's `DesktopScaling`, which is 1 there, and never by a screen's render scaling. The
+settings are read in `App` before the window is built, so it opens in place instead of jumping.
+Measured on a 1x display only; a Retina Mac has not been tried.
 
 ## Navigation
 
@@ -871,6 +1007,30 @@ It keeps its settings in `~/Library/Application Support/deadair/settings.json`, 
 file from anything to do with a session: signing out must not take the station address with it,
 because somebody who signs out is still a listener. The session itself is in the Keychain.
 
+**It asks GitHub once at launch whether there is a newer desktop release, unless Settings says not
+to.** On by default; one request, no install, a link in the sidebar. It reads
+`git/matching-refs/tags/desktop-v` and NOT the releases list: the station's own releases share this
+repository and ship several a day (eight in the two days before this was written), so a page of
+releases stops reaching the newest desktop one within a week or two, and `releases/latest` answers
+the station's. It has an `HttpClient` of its own, built inside `UpdateChecker`'s registration and
+never registered as `HttpClient`, because the station's client carries the operator's bearer token
+and a second `HttpClient` registration would replace the station's for everything that resolves one.
+Every failure answers nothing and writes a log line. No desktop release existed when it was written,
+so a live check answers "0.1.0 is the newest" (measured) and the notice is posed in a Shots frame,
+`sidebar-update`, rather than seen for real.
+
+**Its log is `~/Library/Logs/deadair/deadair.log`**, which Console.app lists on its own, and
+Settings has a Reveal in Finder button for it. `Program.Main` adds the listener before Avalonia is
+built, because `LogToTrace` and everything else in the app writes through `Trace`; before this there
+was no listener at all and a bundled app logged nowhere. The file is rotated to `.1` at startup once
+it is over 4 MiB, every line is flushed as it is written, and a failure to write drops the line
+rather than throwing, because a listener that throws inside `Trace.WriteLine` crashes whoever was
+logging. It carries no account address, since it exists to be attached to a bug report.
+
+The version the app reports (the User-Agent, the log's first line) is `AppVersion.Current`, read
+from the stamped assembly. The SDK appends `+<commit>` to the informational version inside any git
+checkout; `AppVersion.Strip` drops it so the agent does not change with every commit.
+
 The version is `apps/desktop/package.json`, bumped by a changeset naming `@deadair/desktop` and
 copied into `Directory.Build.props` by `pnpm release:version`; CI fails when the two disagree, so edit
 the manifest and never the props. The changelog is `apps/desktop/CHANGELOG.md`, written from the same
@@ -886,7 +1046,19 @@ To build something that can be double-clicked:
 apps/desktop/tools/macos/make-app-bundle.sh
 ```
 
-About 112MB, self-contained, and unsigned — so the first launch needs a right-click and Open.
+About 112MB, self-contained, and signed only ad hoc. **macOS 15 removed the right-click and Open
+route past Gatekeeper**, which this file and the release notes both used to give: now it is open it
+once, let it refuse, then System Settings › Privacy & Security › Open Anyway, or
+`xattr -dr com.apple.quarantine` on the bundle. Ad hoc signing does not change that (only
+notarisation does); what it buys is a bundle `codesign --verify --strict` passes, which the script
+checks, so a Mach-O that would fail notarisation fails here first.
+
+**The shim lives in `Contents/MacOS`, beside the thirty-odd dylibs the publish already put there**,
+because the runtime's default native probing looks in the application directory and never in
+`Contents/Frameworks`. The script used to say every dylib belonged in Frameworks while copying this
+one into MacOS; the code was right and the comment was not. Every file is signed innermost first and
+then the bundle, without `--deep`, and without the hardened runtime, which CoreCLR would need three
+entitlements for and which buys nothing before notarisation.
 
 **Publishing for a runtime identifier used to rewrite every `packages.lock.json` to name that RID**,
 after which a plain restore failed in locked mode because no project declared one — one packaging run

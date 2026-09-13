@@ -27,8 +27,41 @@ public sealed partial class SetupViewModel(ISettingsStore settings, StationProbe
     [ObservableProperty]
     private string? _problem;
 
+    /// <summary>
+    /// Something to know that is not a problem: which station the app is on now, when it is being
+    /// asked to move to another.
+    /// </summary>
+    [ObservableProperty]
+    private string? _note;
+
+    /// <summary>Whether there is a station to go back to, and so a way off this screen without connecting.</summary>
+    [ObservableProperty]
+    private bool _canCancel;
+
+    /// <summary>Raised when somebody decides to stay on the station they had.</summary>
+    public event Action? Cancelled;
+
+    [RelayCommand]
+    private void Cancel()
+    {
+        Problem = null;
+        Note = null;
+        Cancelled?.Invoke();
+    }
+
+    /// <summary>Said when the settings file could not be read, which is often WHY this screen is showing.</summary>
+    /// <remarks>
+    /// An unreadable file loses the station address along with everything else, so the first thing
+    /// somebody sees is this screen asking for an address they already gave. Without the sentence they
+    /// retype it, it connects, and it is gone again at the next launch because the file is not written.
+    /// </remarks>
+    public string? SettingsProblem => SettingsViewModel.DescribeProblem(settings.Problem);
+
     /// <summary>Raised once a station has answered and been saved.</summary>
     public event Action<StationUrl, string?>? Connected;
+
+    /// <summary>Re-reads <see cref="SettingsProblem"/>, which only a load can change.</summary>
+    public void RefreshSettingsProblem() => OnPropertyChanged(nameof(SettingsProblem));
 
     private bool CanConnect => !string.IsNullOrWhiteSpace(Address) && !Busy;
 

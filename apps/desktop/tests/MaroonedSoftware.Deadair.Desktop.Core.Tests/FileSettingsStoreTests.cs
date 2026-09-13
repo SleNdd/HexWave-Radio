@@ -86,20 +86,154 @@ public class FileSettingsStoreTests : IDisposable
     [Fact]
     public async Task StartsCleanWhenTheFileIsRubbishRatherThanRefusingToStart()
     {
-        // Worst case is somebody retyping a station address. Refusing to start would be worse, and
-        // this is deliberate rather than lazy — which is exactly why the test above exists to stop it
-        // hiding an ordinary bug.
-        Directory.CreateDirectory(_directory);
-        await File.WriteAllTextAsync(
-            Path.Combine(_directory, "settings.json"),
-            "{ this is not json",
-            TestContext.Current.CancellationToken);
+        // Refusing to start would be worse than starting with no preferences, and this is deliberate
+        // rather than lazy, which is exactly why the test above exists to stop it hiding an ordinary
+        // bug. Starting clean is only half of it: the tests below are the other half, which is that
+        // the file is then left alone.
+        await WriteRubbishAsync();
 
         using var store = new FileSettingsStore(_directory);
         await store.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.Null(store.Current.Station);
         Assert.Equal(Appearance.System, store.Current.Appearance);
+    }
+
+    /// <summary>
+    /// The bug: the first write of the session, whatever it was, put the defaults the app had fallen
+    /// back to over a file it could not understand, and the station address and every plugin's
+    /// settings went with it. A volume change was enough, and a downgrade was enough to cause it.
+    /// </summary>
+    [Fact]
+    public async Task KeepsAFileItCouldNotReadRatherThanOverwritingIt()
+    {
+        var path = await WriteRubbishAsync();
+
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+        await store.UpdateAsync(settings => settings with { Volume = 0.3 }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(Rubbish, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        Assert.False(File.Exists(path + ".tmp"));
+    }
+
+    [Fact]
+    public async Task AppliesAChangeInMemoryWhenTheFileCouldNotBeRead_SoTheSessionKeepsWorking()
+    {
+        await WriteRubbishAsync();
+
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        DesktopSettings? heard = null;
+        store.Changed += settings => heard = settings;
+
+        var written = await store.UpdateAsync(
+            settings => settings with { Appearance = Appearance.Dark },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(Appearance.Dark, written.Appearance);
+        Assert.Equal(Appearance.Dark, store.Current.Appearance);
+        Assert.Equal(Appearance.Dark, heard?.Appearance);
+    }
+
+    [Fact]
+    public async Task NamesTheFileItCouldNotRead()
+    {
+        var path = await WriteRubbishAsync();
+
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(store.Problem);
+        Assert.Equal(path, store.Problem.Path);
+        Assert.False(string.IsNullOrWhiteSpace(store.Problem.Reason));
+    }
+
+    /// <summary>
+    /// A first launch has no file, and that is an install with nothing to protect: the first change
+    /// has to be written or nothing would ever be remembered.
+    /// </summary>
+    [Fact]
+    public async Task AMissingFileIsNotAProblem()
+    {
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(store.Problem);
+
+        await store.UpdateAsync(settings => settings with { Volume = 0.3 }, TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(Path.Combine(_directory, "settings.json")));
+    }
+
+    [Fact]
+    public async Task RemembersTheWindowFrame()
+    {
+        using var store = new FileSettingsStore(_directory);
+
+        await store.UpdateAsync(
+            settings => settings with { Window = new WindowMemory { X = 120, Y = 80, Width = 1300, Height = 800, Maximized = true } },
+            TestContext.Current.CancellationToken);
+
+        using var reopened = new FileSettingsStore(_directory);
+        await reopened.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new WindowMemory { X = 120, Y = 80, Width = 1300, Height = 800, Maximized = true }, reopened.Current.Window);
+    }
+
+    [Fact]
+    public async Task AFileWithoutAWindowKeyMeansTheDefaultFrame()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(_directory, "settings.json"),
+            """{"station":"https://radio.example.com","volume":0.4}""",
+            TestContext.Current.CancellationToken);
+
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(store.Current.Window);
+    }
+
+    /// <summary>Every settings file written before the check existed is one of these, and it is on for them.</summary>
+    [Fact]
+    public async Task AFileWithoutTheUpdateCheckKeyReadsAsOn()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(_directory, "settings.json"),
+            """{"station":"https://radio.example.com","volume":0.4}""",
+            TestContext.Current.CancellationToken);
+
+        using var store = new FileSettingsStore(_directory);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(store.Current.CheckForUpdates);
+    }
+
+    [Fact]
+    public async Task RemembersThatTheUpdateCheckWasTurnedOff()
+    {
+        using var store = new FileSettingsStore(_directory);
+
+        await store.UpdateAsync(settings => settings with { CheckForUpdates = false }, TestContext.Current.CancellationToken);
+
+        using var reopened = new FileSettingsStore(_directory);
+        await reopened.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(reopened.Current.CheckForUpdates);
+    }
+
+    private const string Rubbish = "{ this is not json";
+
+    private async Task<string> WriteRubbishAsync()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "settings.json");
+        await File.WriteAllTextAsync(path, Rubbish, TestContext.Current.CancellationToken);
+        return path;
     }
 
     [Fact]

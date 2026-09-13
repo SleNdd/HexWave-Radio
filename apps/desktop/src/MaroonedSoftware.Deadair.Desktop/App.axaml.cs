@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using MaroonedSoftware.Deadair.Desktop.Core.Settings;
+using MaroonedSoftware.Deadair.Desktop.Core.Station;
 using MaroonedSoftware.Deadair.Desktop.Services;
 using MaroonedSoftware.Deadair.Desktop.ViewModels;
 using MaroonedSoftware.Deadair.Desktop.Views;
@@ -20,13 +23,40 @@ public partial class App : Application
         {
             _services = Composition.Build();
 
+            // Every way out passes through here, including the ones that never return to Program.
+            desktop.Exit += (_, _) => ReleaseOnExit();
+
             // Where the controls find it. A control is built by XAML and can be handed nothing, so
             // this is the one thing the app reaches for statically, set once from the container.
             ArtworkLoader.Shared = _services.GetRequiredService<ArtworkLoader>();
 
             var shell = _services.GetRequiredService<ShellViewModel>();
 
-            desktop.MainWindow = new MainWindow { DataContext = shell };
+            // Read before the window exists, so it opens where it was left rather than at the default
+            // frame and then jumping, and in the right appearance on its first frame. Blocking here is
+            // safe: the loop has not started, and the read never comes back to this thread.
+            var settings = _services.GetRequiredService<ISettingsStore>();
+            settings.LoadAsync().GetAwaiter().GetResult();
+
+            var window = new MainWindow { DataContext = shell };
+            window.RememberFrame(settings);
+            desktop.MainWindow = window;
+
+            // Before StartAsync, so the Dock's reopen and a link that launched the app are heard from
+            // the first moment it runs.
+            var keeper = new WindowKeeper(desktop, window);
+            keeper.UriOpened += uri =>
+            {
+                if (StationLink.TryParse(uri, out var station))
+                {
+                    _ = shell.OpenStationAsync(station);
+                }
+                else
+                {
+                    Trace.WriteLine($"link: {uri.Scheme}:// link that names no station, ignored");
+                }
+            };
+            shell.Window = keeper;
 
             // For the native menu in App.axaml and nothing else. A NativeMenu has no visual parent,
             // so it cannot inherit the window's; windows still set their own and none of them read
@@ -41,8 +71,11 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
+    /// <summary>How long quitting waits for the container to let go. A speaker's own stop is bounded at three seconds.</summary>
+    private static readonly TimeSpan ExitGrace = TimeSpan.FromSeconds(5);
+
     /// <summary>
-    /// Lets go of everything the container holds, once the main loop has ended.
+    /// Lets go of everything the container holds as the app ends, a speaker it was playing to above all.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -53,12 +86,42 @@ public partial class App : Application
     /// is not something you see when you close a window.
     /// </para>
     /// <para>
-    /// It is called from <c>Program</c> after the loop rather than from the event for two reasons.
-    /// The event can be CANCELLED, and a container disposed by a shutdown that was then called off is
-    /// an app that keeps running with nothing behind it. And disposing after the loop means there is
-    /// no dispatcher left to deadlock against, so the wait for the pollers to stop is a plain wait.
+    /// Then it moved to <c>Program</c>, after the main loop, and that was wrong on macOS in a way
+    /// nothing showed. <b>A quit from the menu, ⌘Q, the Dock or a logout ends the process from inside
+    /// Avalonia's shutdown</b>: AppKit is told the app may terminate and calls <c>exit</c>, so the
+    /// loop never returns and nothing after it runs. Measured: exit code 0 and no closing line in the
+    /// log. So quitting never disposed the container, which is the code that asks a network speaker
+    /// to stop, and a speaker left streaming is a listener the station goes on counting.
+    /// </para>
+    /// <para>
+    /// <see cref="IClassicDesktopStyleApplicationLifetime"/>'s <c>Exit</c> is the last managed code
+    /// that runs on every way out, and it cannot be cancelled, which was the reason for avoiding
+    /// <c>ShutdownRequested</c>. It is raised on the UI thread and returns before the process ends, so
+    /// the work goes to the pool and is waited for, BOUNDED: nothing in the container needs the UI
+    /// thread to finish (every await in it is <c>ConfigureAwait(false)</c>), but an app that hangs
+    /// on its way out because one speaker stopped answering is worse than one that gives up.
     /// </para>
     /// </remarks>
+    private void ReleaseOnExit()
+    {
+        Trace.WriteLine("deadair exiting");
+
+        var releasing = Task.Run(() => DisposeServicesAsync().AsTask());
+
+        try
+        {
+            if (!releasing.Wait(ExitGrace))
+            {
+                Trace.WriteLine($"exit: gave up after {ExitGrace.TotalSeconds:0} seconds waiting for the app to let go");
+            }
+        }
+        catch (AggregateException error)
+        {
+            Trace.WriteLine($"exit: letting go failed: {error.InnerException}");
+        }
+    }
+
+    /// <summary>Disposes the container once; a second call does nothing.</summary>
     internal ValueTask DisposeServicesAsync()
     {
         var services = _services;

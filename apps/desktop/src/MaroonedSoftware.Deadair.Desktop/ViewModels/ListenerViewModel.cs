@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -50,14 +51,30 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
     /// </remarks>
     private readonly DispatcherTicker _volumeSettles;
 
+    /// <summary>Stops the listener after a while. Per session: nothing about it is saved.</summary>
+    private readonly SleepTimer _sleep;
+
     private NowPlayingRepository? _repository;
     private IDisposable? _lease;
     private StationUrl _station;
     private DateTimeOffset? _readAt;
+
+    /// <summary>The width the playing record's cover is decoded to, in pixels.</summary>
+    /// <remarks>
+    /// The largest it is drawn is the desk's cover at 400 units (<c>DeskView.Largest</c>), which is 800
+    /// pixels on a Retina display; the bar draws the same bitmap at 56. A hotlinked cover can be three
+    /// thousand pixels square, which is 36 megabytes to draw a 400-unit square.
+    /// </remarks>
+    private const int HeroDecodeWidth = 800;
+
     private string? _artworkShowing;
     private byte[]? _artworkBytes;
     private bool _hasAppliedItem;
+    private PlayerPhase? _loggedPhase;
     private string? _appliedItemKey;
+
+    /// <summary>Which station attachment is current, so work begun for an earlier one can tell. See <see cref="DetachAsync"/>.</summary>
+    private int _attachment;
 
     public ListenerViewModel(
         OutputSwitch player,
@@ -65,7 +82,8 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
         ISettingsStore settings,
         HttpClient http,
         IUiDispatcher dispatcher,
-        OutputsViewModel? outputs = null)
+        OutputsViewModel? outputs = null,
+        TimeProvider? time = null)
     {
         Outputs = outputs;
         _player = player;
@@ -99,6 +117,51 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
         _ticker = new DispatcherTicker(TimeSpan.FromMilliseconds(500), Tick);
 
         _volumeSettles = new DispatcherTicker(TimeSpan.FromMilliseconds(400), SaveVolume);
+
+        // Owned here because this is the one place that stops the listener. Raised on the timer's
+        // thread, so posted, like the conductor's retry.
+        _sleep = new SleepTimer(time);
+        _sleep.Elapsed += () => _dispatcher.Post(() => _ = OnSleepElapsedAsync());
+    }
+
+    /// <summary>Raised with when the sleep timer will stop the listener, or null once it will not.</summary>
+    public event Action<DateTimeOffset?>? SleepChanged;
+
+    /// <summary>Sets the sleep timer, or with null, cancels it.</summary>
+    /// <remarks>
+    /// Allowed while nothing is playing, and harmless then: elapsing stops what is playing, and if
+    /// that is nothing it does nothing. Disabling the choice until playback starts would only mean
+    /// re-enabling it on every change of phase for no gain.
+    /// </remarks>
+    public void SetSleep(TimeSpan? after)
+    {
+        if (after is { } wait)
+        {
+            _sleep.Set(wait);
+            Trace.WriteLine($"sleep timer: set for {wait.TotalMinutes:0} minutes");
+        }
+        else
+        {
+            _sleep.Cancel();
+        }
+
+        SleepChanged?.Invoke(_sleep.EndsAt);
+    }
+
+    /// <remarks>
+    /// Exactly the listener's own Stop, through <see cref="ToggleAsync"/>: the connection is dropped
+    /// (or the speaker asked to stop), so the station hears the audience go. It never reaches the
+    /// station's playout, which is the operator's to stop and not a timer's.
+    /// </remarks>
+    private async Task OnSleepElapsedAsync()
+    {
+        Trace.WriteLine("sleep timer: time is up");
+        SleepChanged?.Invoke(null);
+
+        if (Playing)
+        {
+            await ToggleAsync().ConfigureAwait(true);
+        }
     }
 
     /// <summary>
@@ -115,10 +178,21 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
     private string _stationName = "deadair";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NowPlayingLine))]
     private string? _title;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NowPlayingLine))]
     private string? _artist;
+
+    /// <summary>The record in one line, for the menu-bar icon, where there is room for nothing else.</summary>
+    public string NowPlayingLine => Title is null
+        ? "Nothing on air"
+        : Artist is null ? Title : $"{Title} – {Artist}";
+
+    /// <summary>What the play control says, in a menu that cannot draw the bar's icon.</summary>
+    /// <remarks>"Listen" rather than "Play", because that is the button's word everywhere else in the app.</remarks>
+    public string PlayLabel => Playing ? "Stop" : "Listen";
 
     [ObservableProperty]
     private string? _album;
@@ -263,6 +337,7 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
 
     private void OnTargetChanged(Output output) => _dispatcher.Post(() =>
     {
+        Trace.WriteLine($"output: {output.Name}");
         OutputName = output.Name;
         OnDevice = !output.IsLocal;
 
@@ -320,11 +395,79 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
         _lease = _repository.Subscribe();
     }
 
+    /// <summary>
+    /// Lets go of the station, before the app is pointed at another.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Stops first, through the listener's own Stop, so the connection is dropped (or the speaker
+    /// asked to stop) and the old station hears its audience leave. Then the reading stops, and the
+    /// record on screen goes, so nothing of the old station is left looking like the new one's.
+    /// </para>
+    /// <para>
+    /// A reading the hold was about to release and a cover still downloading can both arrive after
+    /// this. Each carries the attachment it belongs to and is dropped when that is no longer the
+    /// current one, which is what <see cref="_attachment"/> is for.
+    /// </para>
+    /// </remarks>
+    public async Task DetachAsync()
+    {
+        if (Playing)
+        {
+            await ToggleAsync().ConfigureAwait(true);
+        }
+
+        _attachment++;
+        _hold.Reset();
+        _ticker.Stop();
+
+        if (_repository is not null)
+        {
+            _repository.Changed -= OnReading;
+            _lease?.Dispose();
+            _lease = null;
+            await _repository.DisposeAsync().ConfigureAwait(true);
+            _repository = null;
+        }
+
+        _hasAppliedItem = false;
+        _appliedItemKey = null;
+        _artworkShowing = null;
+        _artworkBytes = null;
+        _readAt = null;
+
+        Title = null;
+        Artist = null;
+        Album = null;
+        Artwork = null;
+        OnAir = false;
+        Listeners = 0;
+        ListenersLabel = ListenerCount.Label(0);
+        Stale = false;
+        HasPlayhead = false;
+        Position = 0;
+        Duration = 0;
+        Elapsed = ClockFormat.Unknown;
+        Remaining = ClockFormat.Unknown;
+        OnPropertyChanged(nameof(Initial));
+        OnPropertyChanged(nameof(AirTone));
+
+        _systemNowPlaying.Clear();
+    }
+
     [RelayCommand]
     private async Task ToggleAsync()
     {
         if (Playing)
         {
+            // A stop by hand or by media key ends the timer too, so every way of stopping leaves the
+            // same state behind. An elapsed timer has already cleared itself, so this is then nothing.
+            if (_sleep.IsSet)
+            {
+                _sleep.Cancel();
+                SleepChanged?.Invoke(null);
+            }
+
             _conductor.Released();
             Apply();
             await _player.StopAsync().ConfigureAwait(true);
@@ -374,6 +517,14 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
 
     private void OnPlayerStatus(PlayerStatus status) => _dispatcher.Post(() =>
     {
+        // Here because this is the one place that hears this Mac's player and a speaker's alike. A
+        // phase, not every report: a network player can repeat itself on each poll.
+        if (status.Phase != _loggedPhase)
+        {
+            _loggedPhase = status.Phase;
+            Trace.WriteLine(status.Detail is null ? $"player: {status.Phase}" : $"player: {status.Phase} ({status.Detail})");
+        }
+
         _conductor.Observed(status);
         Apply();
         PublishToSystem();
@@ -486,7 +637,18 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
         now.Track?.StartedAt.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>A reading the hold has released, raised on its own timer thread rather than the UI one.</summary>
-    private void OnHoldReleased(NowPlayingReading now) => _dispatcher.Post(() => ApplyTrack(now));
+    private void OnHoldReleased(NowPlayingReading now)
+    {
+        var attachment = _attachment;
+        _dispatcher.Post(() =>
+        {
+            // Released for a station the app has since let go of: see DetachAsync.
+            if (attachment == _attachment)
+            {
+                ApplyTrack(now);
+            }
+        });
+    }
 
     /// <summary>
     /// Applies the fields that describe the record itself, and rewrites the system widget and
@@ -581,12 +743,23 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
             await stream.CopyToAsync(buffer).ConfigureAwait(false);
             buffer.Position = 0;
 
+            // The bytes as they arrived go to the system's Now Playing display, which scales them
+            // itself; only the bitmap this app draws is decoded down.
             var bytes = buffer.ToArray();
             buffer.Position = 0;
-            var bitmap = new Bitmap(buffer);
+            var bitmap = Bitmap.DecodeToWidth(buffer, HeroDecodeWidth, BitmapInterpolationMode.HighQuality);
 
+            // Only if this is still the cover wanted. A slow download can finish after the record
+            // has moved on, or after the app has been pointed at another station, and drawing it
+            // then would put an old cover beside a new title.
             _dispatcher.Post(() =>
             {
+                if (key != _artworkShowing)
+                {
+                    bitmap.Dispose();
+                    return;
+                }
+
                 Artwork = bitmap;
                 _artworkBytes = bytes;
                 PublishToSystem();
@@ -598,8 +771,11 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
             // rather than a fault. The view falls back to a quiet square.
             _dispatcher.Post(() =>
             {
-                Artwork = null;
-                _artworkBytes = null;
+                if (key == _artworkShowing)
+                {
+                    Artwork = null;
+                    _artworkBytes = null;
+                }
             });
         }
     }
@@ -608,6 +784,7 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
     {
         Listening = _conductor.State;
         OnPropertyChanged(nameof(Playing));
+        OnPropertyChanged(nameof(PlayLabel));
         OnPropertyChanged(nameof(IsLive));
 
         (ListeningLabel, Tone) = _conductor.State switch
@@ -634,6 +811,7 @@ public sealed partial class ListenerViewModel : ObservableObject, IAsyncDisposab
         _hold.Dispose();
         _ticker.Stop();
         _volumeSettles.Stop();
+        _sleep.Dispose();
         _systemNowPlaying.Clear();
         _lease?.Dispose();
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MaroonedSoftware.Deadair.Desktop.Core.Auth;
@@ -5,6 +6,8 @@ using MaroonedSoftware.Deadair.Desktop.Core.Plugins;
 using MaroonedSoftware.Deadair.Desktop.Core.Settings;
 using MaroonedSoftware.Deadair.Desktop.Core.Station;
 using MaroonedSoftware.Deadair.Desktop.Core.Ui;
+using MaroonedSoftware.Deadair.Desktop.Core.Updates;
+using MaroonedSoftware.Deadair.Desktop.Services;
 using MaroonedSoftware.Deadair.Desktop.Themes;
 
 // The `Navigation` property below shadows the namespace of the same name, so the destination types
@@ -42,6 +45,9 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
     /// </summary>
     private readonly PluginManager? _plugins;
 
+    /// <summary>Optional for the same reason: a shot must not ask GitHub anything.</summary>
+    private readonly UpdateChecker? _updates;
+
     public ShellViewModel(
         ISettingsStore settings,
         SessionManager session,
@@ -59,11 +65,13 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         VoiceViewModel voice,
         ThemeManager themes,
         IUiDispatcher dispatcher,
-        PluginManager? plugins = null)
+        PluginManager? plugins = null,
+        UpdateChecker? updates = null)
     {
         _settings = settings;
         _session = session;
         _dispatcher = dispatcher;
+        _updates = updates;
         Setup = setup;
         Listener = listener;
         Login = login;
@@ -79,9 +87,18 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         _themes = themes;
         _plugins = plugins;
 
-        Setup.Connected += (station, name) => _ = AttachAsync(station, name);
+        Setup.Connected += (station, name) => _ = SwitchAsync(station, name);
+        Setup.Cancelled += () =>
+        {
+            Setup.CanCancel = false;
+            NeedsStation = false;
+        };
         Login.SignedIn += () => ApplySession();
-        _session.Changed += _ => _dispatcher.Post(ApplySession);
+        _session.Changed += state =>
+        {
+            LogSession(state);
+            _dispatcher.Post(ApplySession);
+        };
 
         // NextSkips lives in the settings file rather than on the session, so turning it on or off
         // has to reapply the system's Next button the same way signing in and out already does.
@@ -97,6 +114,11 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         // The format picker is told what the station publishes rather than asking, and never by
         // connecting to a mount to find out.
         Listener.MountsChanged += StationSettings.ApplyMounts;
+
+        // The sleep timer is chosen on the settings page and kept by the listener, which owns the
+        // only stop; the page is told back when it changes, including when it elapses.
+        StationSettings.SleepRequested += Listener.SetSleep;
+        Listener.SleepChanged += StationSettings.ApplySleep;
 
         // A page fetches when it is opened rather than on a timer. A catalog does not change while
         // somebody is looking at it, and the station rate-limits.
@@ -165,7 +187,15 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
     public async Task StartAsync()
     {
-        await _settings.LoadAsync().ConfigureAwait(true);
+        // The settings were read before the window was built (see App), so the window could open
+        // where it was left. What a failed read means for the setup screen is said now.
+        Setup.RefreshSettingsProblem();
+
+        // Not awaited: attaching to the station must never wait on GitHub.
+        if (_updates is not null && _settings.Current.CheckForUpdates)
+        {
+            _ = CheckForUpdatesAsync(_updates);
+        }
 
         // After the settings and before anything asks a plugin for anything: which plugins run is a
         // decision kept in that file, so starting them first would start the wrong ones.
@@ -195,10 +225,149 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         }
 
         Ready = true;
+        _started.TrySetResult();
+    }
+
+    /// <summary>
+    /// Writes a change of session to the log, and only a change: a token refresh publishes the same
+    /// state again, and a log that says "signed in" every quarter of an hour says nothing.
+    /// </summary>
+    /// <remarks>No address: the log is for attaching to a bug report, and whose account it was is not needed there.</remarks>
+    private void LogSession(SessionState state)
+    {
+        var said = state switch
+        {
+            SessionState.SignedIn { IsOperator: true } => "signed in as the operator",
+            SessionState.SignedIn => "signed in",
+            _ => "signed out",
+        };
+
+        if (said != _loggedSession)
+        {
+            _loggedSession = said;
+            Trace.WriteLine($"session: {said}");
+        }
+    }
+
+    private string? _loggedSession;
+
+    /// <summary>The station the app is attached to, or null before the first and during a switch.</summary>
+    private StationUrl? _current;
+
+    /// <summary>Set once <see cref="StartAsync"/> has decided whether there is a station, for a link that arrives before it has.</summary>
+    private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Offers a station a <c>deadair://</c> link named, and connects to it only if somebody says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Waits for <see cref="StartAsync"/> first: a link that launched the app arrives while the
+    /// settings are still being read, and deciding before then whether there is a station already
+    /// would decide wrongly.
+    /// </para>
+    /// <para>
+    /// The station already here: just the window, brought forward. None yet: the setup screen,
+    /// filled in. A different one: the setup screen, filled in, saying what connecting will leave,
+    /// with a way back; the current station keeps playing until the new one answers, because a link
+    /// is a suggestion and nothing moves playback on its own.
+    /// </para>
+    /// </remarks>
+    public async Task OpenStationAsync(StationUrl link)
+    {
+        await _started.Task.ConfigureAwait(true);
+
+        Trace.WriteLine($"link: offered {link}");
+        Window?.Show();
+
+        if (_current is { } current && current == link)
+        {
+            return;
+        }
+
+        Setup.Address = link.ToString();
+        Setup.Problem = null;
+        Setup.Note = _current is null
+            ? null
+            : $"You are listening to {Listener.StationName}. Connect to switch to this station instead.";
+        Setup.CanCancel = _current is not null;
+        NeedsStation = true;
+    }
+
+    /// <summary>
+    /// Asks for another station's address, keeping this one until somebody connects to the new one.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is let go of here. The setup screen is only a question, and somebody can decline it
+    /// and be back where they were with the station still playing; nothing moves playback on its own.
+    /// </remarks>
+    [RelayCommand]
+    private void ChangeStation()
+    {
+        Setup.Address = _current?.ToString() ?? string.Empty;
+        Setup.Problem = null;
+        Setup.Note = null;
+        Setup.CanCancel = _current is not null;
+        NeedsStation = true;
+    }
+
+    /// <summary>
+    /// Attaches to a station that has just answered, letting go of the one before it first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AttachAsync"/> had only ever run once per process, and a second call over the
+    /// first would have left the old station's pollers running with the new station's token, the old
+    /// record on screen and the old catalog in the library. So a switch detaches every page that holds
+    /// something of a station and then attaches, as a first run would.
+    /// </para>
+    /// <para>
+    /// The same station again just closes the setup screen: connecting to where you already are is
+    /// not a reason to stop listening.
+    /// </para>
+    /// </remarks>
+    private async Task SwitchAsync(StationUrl station, string? name)
+    {
+        if (_current is { } current && current == station)
+        {
+            Setup.CanCancel = false;
+            Setup.Note = null;
+            NeedsStation = false;
+            return;
+        }
+
+        if (_current is not null)
+        {
+            await DetachAsync().ConfigureAwait(true);
+        }
+
+        await AttachAsync(station, name).ConfigureAwait(true);
+    }
+
+    private async Task DetachAsync()
+    {
+        Trace.WriteLine($"station: {_current} detached");
+
+        // The listener first: its Stop is what tells the old station its audience has gone.
+        await Listener.DetachAsync().ConfigureAwait(true);
+        await Transport.DetachAsync().ConfigureAwait(true);
+        await Order.DetachAsync().ConfigureAwait(true);
+
+        // These fetch only while empty, so they are emptied. Programme, History, Check-up and Voice
+        // fetch on every visit and need nothing.
+        Library.Reset();
+        StationSettings.Reset();
+
+        Navigation.Show(new Nav.Destination.Desk());
+        _current = null;
     }
 
     private async Task AttachAsync(StationUrl station, string? name)
     {
+        Trace.WriteLine($"station: {station} attached");
+        _current = station;
+        Setup.CanCancel = false;
+        Setup.Note = null;
         Listener.Attach(station, name);
 
         if (Listener.Outputs is { } outputs)
@@ -251,6 +420,41 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
     /// <summary>Back to what is on air, from the player bar on any other page.</summary>
     [RelayCommand]
     private void ShowDesk() => Navigation.Show(new Nav.Destination.Desk());
+
+    /// <summary>A newer desktop release, if the check at launch found one.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateNoticeText))]
+    private UpdateAvailable? _updateNotice;
+
+    public string? UpdateNoticeText => UpdateNotice is null ? null : UpdateCheck.Describe(UpdateNotice);
+
+    private async Task CheckForUpdatesAsync(UpdateChecker updates)
+    {
+        var found = await updates.CheckAsync().ConfigureAwait(false);
+
+        if (found is not null)
+        {
+            _dispatcher.Post(() => UpdateNotice = found);
+        }
+    }
+
+    /// <summary>The app's window, for the menus. Absent in a headless render, where there is none to keep.</summary>
+    public IWindowKeeper? Window { get; set; }
+
+    /// <summary>Brings the window back, from the menu-bar icon.</summary>
+    [RelayCommand]
+    private void ShowWindow() => Window?.Show();
+
+    /// <summary>The Window menu's Close: hides, since closing is not quitting.</summary>
+    [RelayCommand]
+    private void HideWindow() => Window?.Hide();
+
+    [RelayCommand]
+    private void MinimizeWindow() => Window?.Minimize();
+
+    /// <summary>The one way to stop the app, now that closing the window does not.</summary>
+    [RelayCommand]
+    private void Quit() => Window?.Quit();
 
     [RelayCommand]
     private async Task SignOutAsync(CancellationToken cancellationToken)
