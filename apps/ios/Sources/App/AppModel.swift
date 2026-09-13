@@ -14,6 +14,11 @@ final class AppModel {
     let session: SessionManager
     let listening: Listening
     let artwork: ArtworkLoader
+    /// What the station has played, and what it is scheduled to do: the signed-in operator's reads.
+    let history: HistoryRepository
+    let schedule: ScheduleRepository
+
+    @ObservationIgnored private var openPlay = OpenPlay()
 
     init() {
         let http = StationHttp(userAgent: StationHttp.bundleAgent)
@@ -23,14 +28,23 @@ final class AppModel {
             try await http.sdk(for: station).nowplaying.getNowPlaying()
         }
         let artwork = ArtworkLoader(session: http.session)
+        let session = SessionManager(storage: KeychainSessionStorage(), station: station) { station, headers in
+            http.sdk(for: station, headers: headers)
+        }
         self.http = http
         self.settings = settings
         self.nowPlaying = nowPlaying
         self.artwork = artwork
-        session = SessionManager(storage: KeychainSessionStorage(), station: station) { station, headers in
-            http.sdk(for: station, headers: headers)
-        }
+        self.session = session
         listening = Listening(settings: settings, nowPlaying: nowPlaying, artwork: artwork, userAgent: http.userAgent)
+        // Through the session, which refreshes and replays once on a 401, and throws rather than asks
+        // when nobody is signed in: these screens are only offered to a signed-in account anyway.
+        history = HistoryRepository { query in try await session.withSession { try await $0.history.readHistory(query: query) } }
+        schedule = ScheduleRepository(
+            readCurrent: { try await session.withSession { try await $0.schedule.readCurrentSlot() } },
+            readSlots: { try await session.withSession { try await $0.schedule.listSchedule().slots } },
+            readPersonas: { try await session.withSession { try await $0.personas.listPersonas().personas } }
+        )
     }
 
     /// Ask an address whether it is a station, before it is kept.
@@ -45,6 +59,21 @@ final class AppModel {
         settings.keep(station, name: name)
         nowPlaying.point(at: station)
         session.point(at: station)
+        history.reset()
+        schedule.reset()
+    }
+
+    /// The app has opened: start the station if the listener asked for that. Answers yes once per
+    /// process at most, so a root view appearing again does not start it again.
+    func opened() {
+        if openPlay.shouldPlay(settings.settings) { listening.play() }
+    }
+
+    /// Whether the account can read the station's own record of itself. A hint for what to offer,
+    /// never a gate: the station decides every read.
+    var signedIn: Bool {
+        if case .signedIn = session.state { return true }
+        return false
     }
 
     /// The Now playing screen's state, from the reading and the player together.
@@ -60,7 +89,8 @@ final class AppModel {
             playing: listening.conductor.state == .playing,
             buffering: listening.conductor.state == .warmingUp,
             fellBackToMp3: listening.wantsToPlay && listening.choice?.fellBack == true,
-            stale: state.isStale
+            stale: state.isStale,
+            show: reading?.show
         )
     }
 }

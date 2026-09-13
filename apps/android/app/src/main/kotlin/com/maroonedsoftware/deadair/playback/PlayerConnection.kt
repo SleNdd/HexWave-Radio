@@ -2,6 +2,7 @@ package com.maroonedsoftware.deadair.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -16,6 +17,10 @@ data class PlayerUiState(
     val buffering: Boolean = false,
     /** What the listener asked for, which is not the same as what is coming out yet. */
     val requested: Boolean = false,
+    /** The sleep timer, as the service last said. */
+    val sleep: SleepState = SleepState.Off,
+    /** Whether the controller has bound, before which `play()` is silently nothing. */
+    val connected: Boolean = false,
 )
 
 /**
@@ -33,8 +38,9 @@ class PlayerConnection(private val context: Context) {
     private val listener =
         object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
+                // A copy, not a fresh state: the sleep timer arrives by a different road.
                 _state.value =
-                    PlayerUiState(
+                    _state.value.copy(
                         playing = player.isPlaying,
                         buffering = player.playbackState == Player.STATE_BUFFERING,
                         requested = player.playWhenReady,
@@ -42,17 +48,39 @@ class PlayerConnection(private val context: Context) {
             }
         }
 
+    /** The session's extras are where the service says how the sleep timer stands. */
+    private val sessionListener =
+        object : MediaController.Listener {
+            override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+                _state.value = _state.value.copy(sleep = SleepCommands.stateOf(extras))
+            }
+        }
+
     fun connect() {
         if (controller != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = MediaController.Builder(context, token).setListener(sessionListener).buildAsync()
         future.addListener(
             {
                 controller = future.get().also { it.addListener(listener) }
-                _state.value = _state.value.copy(requested = controller?.playWhenReady ?: false)
+                _state.value =
+                    _state.value.copy(
+                        connected = true,
+                        requested = controller?.playWhenReady ?: false,
+                        sleep = controller?.sessionExtras?.let(SleepCommands::stateOf) ?: SleepState.Off,
+                    )
             },
             MoreExecutors.directExecutor(),
         )
+    }
+
+    /** Set the sleep timer. The service answers through the session's extras. */
+    fun armSleep(request: SleepRequest) {
+        controller?.sendCustomCommand(SleepCommands.ARM, SleepCommands.request(request))
+    }
+
+    fun clearSleep() {
+        controller?.sendCustomCommand(SleepCommands.CLEAR, Bundle.EMPTY)
     }
 
     fun release() {

@@ -26,6 +26,17 @@ public enum Message: Equatable, Sendable {
     /// "N listening · MP3", with the count spelled the way the language counts.
     case listeners(count: Int, format: StreamFormat)
     case fellBackToMp3(wanted: StreamFormat)
+    /// The title while the station talks between records: "Cass is on the mic". `host` is the name
+    /// the station sent, and absent when it named nobody, which has its own sentence rather than a
+    /// blank where the name would go.
+    case onTheMic(host: String?)
+    /// The line above the record: "Late Static · with Cass". Both halves are the station's words.
+    case showWithHost(show: String, host: String)
+    /// The same line when the show has no name to give: "with Cass".
+    case withHost(String)
+    /// The sleep timer's countdown: "Stops in 14 min". Never less than a minute.
+    case stopsIn(Span)
+    case stopsAfterThisRecord
 
     // MARK: The address field
 
@@ -48,4 +59,24 @@ public enum Message: Equatable, Sendable {
     case signInExpired
     case factorRefused
     case noRefreshToken
+
+    // MARK: The schedule
+
+    case onAir
+    case dueNow
+    case upNext
+    case afterThat
+    case untitled
+    /// "1 h 30 min left"
+    case left(Span)
+    /// "in 1 h 30 min"
+    case startsIn(Span)
+    case sustainingFor(Span)
+    case noBlockDue
+    /// "20:00–22:00", or "Mon 09:00–11:00" when the block is not on the station's today.
+    case blockHours(BlockHours)
+
+    // MARK: History
+
+    case aired(AiredLabel)
 }

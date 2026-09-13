@@ -51,6 +51,24 @@ sealed interface Message {
 
     data class FellBackToMp3(val wanted: StreamFormat) : Message
 
+    /**
+     * The title while the station talks between records: "Cass is on the mic". `host` is the name
+     * the station sent, and absent when it named nobody, which has its own sentence rather than a
+     * blank where the name would go.
+     */
+    data class OnTheMic(val host: String?) : Message
+
+    /** The line above the record: "Late Static · with Cass". Both halves are the station's words. */
+    data class ShowWithHost(val show: String, val host: String) : Message
+
+    /** The same line when the show has no name to give: "with Cass". */
+    data class WithHost(val host: String) : Message
+
+    /** The sleep timer's countdown: "Stops in 14 min". Never less than a minute. */
+    data class StopsIn(val span: Span) : Message
+
+    data object StopsAfterThisRecord : Message
+
     // ── The address field ─────────────────────────────────────────────────────────────────
     data class AnsweredAs(val name: String) : Message
 
