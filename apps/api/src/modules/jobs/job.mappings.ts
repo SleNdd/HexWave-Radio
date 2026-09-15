@@ -26,6 +26,8 @@ import { PersonaStoryPassJob } from '#modules/personas/persona.story.pass.job.js
 import { PruneActivityJob } from '#modules/activity/prune.activity.job.js';
 import { SweepTrackCacheJob } from '#modules/playout/audio/sweep.track.cache.job.js';
 import { ScrobbleFlushJob } from '#modules/scrobble/scrobble.flush.job.js';
+import { RefreshPodcastsJob } from '#modules/podcasts/refresh.podcasts.job.js';
+import { FetchEpisodeJob } from '#modules/podcasts/fetch.episode.job.js';
 
 /**
  * What a job name maps to. The bare constructor is the short form for an
@@ -436,5 +438,29 @@ export const JobMappings: Record<JobNames, JobMapping> = {
         job: ScrobbleFlushJob,
         cron: '*/2 * * * *',
         policy: { retryLimit: 0, expiresIn: Duration.fromObject({ minutes: 5 }) },
+    },
+
+    // Every half hour, off the hour so it does not land on the catalog sync. A show publishes daily at
+    // most, so a half hour is the most an episode can sit unseen, and the station fetches the audio
+    // hours ahead of the slot it airs in, so nothing is waiting on this.
+    //
+    // No retry: a refresh that failed leaves the episodes it did not reach exactly as unknown as they
+    // were, so the next run IS the retry, and the console can ask for one sooner. `expiresIn` sits
+    // under the interval so a wedged run is reclaimed before the next starts; a refresh reading a few
+    // dozen feeds of a few megabytes each finishes well inside it.
+    'podcasts.refresh': {
+        job: RefreshPodcastsJob,
+        cron: '17,47 * * * *',
+        policy: { retryLimit: 0, expiresIn: Duration.fromObject({ minutes: 20 }) },
+    },
+
+    // No cron: sent when an episode's audio is wanted, by the scheduler as its slot approaches or by
+    // an operator. No retry either: every failure is written on the episode, and whatever asks next is
+    // the retry, which the episode's own `fetch_requested_at` keeps from being asked twice at once.
+    // `expiresIn` clears the fetch's own deadline (`EPISODE_FETCH_TIMEOUT_MS`, fifteen minutes), so a
+    // wedged download is reclaimed rather than holding a worker.
+    'podcasts.fetch': {
+        job: FetchEpisodeJob,
+        policy: { retryLimit: 0, expiresIn: Duration.fromObject({ minutes: 20 }) },
     },
 };

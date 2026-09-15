@@ -198,6 +198,14 @@ export const queryKeys = {
         stories: (feedId?: string) => ['news', 'stories', feedId ?? ''] as const,
     },
 
+    /** The shows the station carries, and the episodes of them it knows about, narrowed by show. */
+    podcasts: {
+        shows: () => ['podcasts', 'shows'] as const,
+        episodes: (showId?: string) => ['podcasts', 'episodes', showId ?? ''] as const,
+        /** A directory search, by the words searched for. Never fetched until somebody searches. */
+        directory: (query: string) => ['podcasts', 'directory', query] as const,
+    },
+
     /** One list, because the API answers with the whole library and every write answers with it again. */
     segments: {
         list: () => ['segments', 'list'] as const,

@@ -32,6 +32,7 @@ was shipped first and was wrong.
 | what a break says, facts, phrasings, bulletins, the format clock | [`docs/internals/breaks.md`](docs/internals/breaks.md) |
 | personas, their notebooks, their stories, latitude, auditions | [`docs/internals/personas.md`](docs/internals/personas.md) |
 | phone-ins, beats, casting, stitching | [`docs/internals/productions.md`](docs/internals/productions.md) |
+| podcasts the station carries, `syndicated` bands, episode fetches | [`docs/internals/podcasts.md`](docs/internals/podcasts.md) |
 | speech engines, voices, cues, pads, segment stages, pronunciations | [`docs/internals/render.md`](docs/internals/render.md) |
 | the mount, the audience gate, why it is quiet, the activity feed | [`docs/internals/playout.md`](docs/internals/playout.md) |
 | the model, the gate, the tool loop | [`docs/internals/llm.md`](docs/internals/llm.md) |
@@ -87,8 +88,10 @@ pointing at something that has never existed:
   there is no event bus: `apps/api/CLAUDE.md` § "How work is dispatched".
 - `apps/api/README.md` for the boot sequence, DI scoping convention and middleware. Its module and
   route tables were checked against `src/modules/modules.ts` and `src/routes/routes.setup.ts` on
-  2026-09-09 and list all 37 modules and all 30 routers in registration order. Those two files stay
-  the source of truth: verify against them before relying on an entry.
+  2026-09-09 and listed all 37 modules and all 29 routers in registration order then. On 2026-09-15
+  the API keys router was added to the one and Podcasts to both; `MailModule`, registered since the
+  check, is in neither yet. Those two files stay the source of truth: verify against them before
+  relying on an entry.
 - `README.md` and `docs/licensing.md` are written for whoever RUNS this rather than for whoever
   works on it. Keep them true.
 
@@ -118,8 +121,9 @@ packages/config-*     shared eslint / tsconfig
 plugins/*             bundled plugins: spotify, navidrome, musicbrainz, lastfm, wikipedia (the
                       prose the station's facts are extracted from), rss, websearch (SearXNG, Brave
                       or Tavily, whichever the operator points it at), weather (Open-Meteo, the US
-                      National Weather Service or OpenWeatherMap), kokoro and chatterbox
-                      (the station's voice), llm, analyzer (the adapter over the measurement sidecar)
+                      National Weather Service or OpenWeatherMap), podcast (the shows the station
+                      carries, read from their feeds), kokoro and chatterbox (the station's voice),
+                      llm, analyzer (the adapter over the measurement sidecar)
 analysis/             the measurement sidecar: a Python service that decodes a record and answers
                       with its cue points and its loudness. No decoding happens in Node
 stream/, nginx/, docker-compose*.yml   Icecast, Liquidsoap and friends (DEV)
@@ -129,7 +133,7 @@ deploy/, unraid/                  how somebody else installs it
 
 `apps/api` modules, in registration order: `logging`, `dataConnections`, `health`, `data`, `crypto`,
 `authentication`, `permissions`, `policy`, `art`, `catalog`, `onboarding`, `settings`, `stream`,
-`plugins`, `jobs`, `playlists`, `charts`, `similarity`, `news`, `search`, `weather`, `topics`,
+`plugins`, `jobs`, `playlists`, `charts`, `similarity`, `news`, `search`, `weather`, `podcasts`, `topics`,
 `scrobble`, `llm`,
 `personas`, `schedule`, `render`, `playout`, `nowplaying`, `analysis`, `director`, `storage`,
 `activity`, `history`, `enrichment`, `productions`, `station`. **`src/modules/modules.ts` is the source of
