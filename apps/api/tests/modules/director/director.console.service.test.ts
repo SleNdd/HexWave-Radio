@@ -403,6 +403,22 @@ describe('DirectorConsoleService building a running order from a playlist', () =
         expect(posted()[0]).toMatchObject({ kind: 'putOnAir' });
     });
 
+    it('binds a request to mix similar records in as a rule of the broadcast, beside calls', async () => {
+        const { service, posted } = build();
+
+        await service.putOnAir({ pluginId: 'deadair.spotify', playlistId: 'pl_1', mixInSimilar: true, callins: false });
+
+        expect(posted()[0]).toMatchObject({ kind: 'putOnAir', binding: { rules: { mixInSimilar: true, callins: false } } });
+    });
+
+    it('leaves the rules off the binding when the operator asked for none, so the station settings stand', async () => {
+        const { service, posted } = build();
+
+        await service.putOnAir({ pluginId: 'deadair.spotify', playlistId: 'pl_1' });
+
+        expect(posted()[0]?.kind === 'putOnAir' ? posted()[0] : undefined).not.toHaveProperty('binding.rules');
+    });
+
     it('treats a blank brief as no brief at all', async () => {
         // Otherwise a console sending an empty box would put an empty instruction in the prompt.
         const { service, posted } = build();
@@ -1107,6 +1123,18 @@ describe('DirectorConsoleService editing the running order', () => {
 
         expect(drawn.items[0]).toMatchObject({ artistId: 'art_trk_single' });
         expect(drawn.items[0]!.albumId).toBeUndefined();
+    });
+
+    it('says which records the station mixed in, and nothing about the ones the playlist named', async () => {
+        const order = new StationLineup({ name: 'Afternoons', mode: 'rotation', onEnd: 'extend', source: 'import' });
+        const [anchor] = order.append([{ pluginId: 'p', externalId: 't0', title: 'Named', artists: ['X'], artist: 'X' }]);
+        order.interleave([{ afterItemId: anchor!.id, track: { pluginId: 'p', externalId: 't1', title: 'Found', artists: ['Y'], artist: 'Y' } }]);
+        const { service } = build({ order });
+
+        const drawn = await service.getOrder();
+
+        expect(drawn.items.map(item => item.mixedIn)).toEqual([undefined, true]);
+        expect(drawn.items[0]).not.toHaveProperty('mixedIn');
     });
 
     it('draws an empty running order rather than a 404 when nothing is on', async () => {

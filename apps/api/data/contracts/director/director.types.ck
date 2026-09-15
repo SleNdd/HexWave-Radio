@@ -54,6 +54,7 @@ contract StationOrderItem: { # One item of the live running order, and where it 
     artistId?: string(max=100) # The canonical artist behind that track, so a console can reach their page from the running order. Absent on a segment, and on a record the catalog has never seen
     albumId?: string(max=100) # The release that track was ingested inside. Absent for the two reasons above and for a third: a single ingested outside any release has none
     rating?: Rating # What the station thinks of this record, read as the order is drawn rather than stored on it. Absent on a segment, and on a record the catalog has never seen
+    mixedIn?: boolean # The station chose this record to sound like the playlist around it, rather than the playlist naming it. Absent on everything the playlist named, and on a segment
     segmentId?: string(min=1, max=100) # Which segment this plays. Present only on a segment
     segmentState?: enum(planned, writing, written, rendering, ready, failed, gone)
     playable?: boolean # Whether the station can actually air this segment. One that cannot is SKIPPED when it comes round, rather than held open
@@ -87,6 +88,7 @@ contract PutOnAirInput: { # Put the station on air, building its running order f
     eraFrom?: int(min=1900, max=2100) # The earliest release year this broadcast plays. Absent means no lower bound, and a record whose year the catalog does not know is played whatever the period
     eraTo?: int(min=1900, max=2100) # The latest release year, on the same terms. Set with `eraFrom` for a decade; either may stand alone
     callins?: boolean # Whether somebody phones in during this broadcast. A call is a short programme rather than a break: a few turns in a few voices, entering the running order as one block, spaced by `rotation.callinEveryMinutes`. Absent takes the station's own setting, which is off
+    mixInSimilar?: boolean # Whether records that sound like the ones on this playlist are mixed in among them, one every `rotation.mixInEvery` records, found through the similarity plugin. The playlist still plays in full and in its own order around them. Absent takes the station's own setting, which is off. A setlist and a feature never have anything mixed in
     mode?: StationMode
     onEnd?: StationOnEnd
 }

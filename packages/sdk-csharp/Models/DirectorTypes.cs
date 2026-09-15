@@ -272,6 +272,11 @@ public sealed record PutOnAirInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Callins { get; init; }
 
+    /// <summary>Whether records that sound like the ones on this playlist are mixed in among them, one every `rotation.mixInEvery` records, found through the similarity plugin. The playlist still plays in full and in its own order around them. Absent takes the station's own setting, which is off. A setlist and a feature never have anything mixed in</summary>
+    [JsonPropertyName("mixInSimilar")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MixInSimilar { get; init; }
+
     [JsonPropertyName("mode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public StationMode? Mode { get; init; }
@@ -348,6 +353,11 @@ public sealed record StationOrderItem
     [JsonPropertyName("rating")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Rating? Rating { get; init; }
+
+    /// <summary>The station chose this record to sound like the playlist around it, rather than the playlist naming it. Absent on everything the playlist named, and on a segment</summary>
+    [JsonPropertyName("mixedIn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MixedIn { get; init; }
 
     /// <summary>Which segment this plays. Present only on a segment</summary>
     [JsonPropertyName("segmentId")]

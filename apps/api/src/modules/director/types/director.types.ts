@@ -52,7 +52,7 @@ export type StationItemState = z.infer<typeof StationItemState>;
 
 /**
  * Change who is presenting the broadcast that is on air
- * generated from [SetStationHostInput](../../../../data/contracts/director/director.types.ck#L94)
+ * generated from [SetStationHostInput](../../../../data/contracts/director/director.types.ck#L96)
  */
 export const SetStationHostInput = z.strictObject({
     personaId: z
@@ -68,7 +68,7 @@ export type SetStationHostInput = z.infer<typeof SetStationHostInput>;
 
 /**
  * Put something the station says into the running order
- * generated from [AddStationSegmentInput](../../../../data/contracts/director/director.types.ck#L98)
+ * generated from [AddStationSegmentInput](../../../../data/contracts/director/director.types.ck#L100)
  */
 export const AddStationSegmentInput = z.strictObject({
     segmentId: z.string().min(1).max(100),
@@ -87,7 +87,7 @@ export type AddStationSegmentInput = z.infer<typeof AddStationSegmentInput>;
 
 /**
  * Put a catalog record into the running order. Refused at the door — 404 for a record the catalog does not hold, 422 for one whose audio is not local yet — rather than accepted and left to fail when it comes round
- * generated from [AddStationTrackInput](../../../../data/contracts/director/director.types.ck#L104)
+ * generated from [AddStationTrackInput](../../../../data/contracts/director/director.types.ck#L106)
  */
 export const AddStationTrackInput = z.strictObject({
     trackId: z.uuid(),
@@ -100,7 +100,7 @@ export type AddStationTrackInput = z.infer<typeof AddStationTrackInput>;
 
 /**
  * Move an item within the running order
- * generated from [MoveStationItemInput](../../../../data/contracts/director/director.types.ck#L109)
+ * generated from [MoveStationItemInput](../../../../data/contracts/director/director.types.ck#L111)
  */
 export const MoveStationItemInput = z.strictObject({
     toIndex: z.preprocess(v => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v), z.number().int().min(0)),
@@ -109,7 +109,7 @@ export type MoveStationItemInput = z.infer<typeof MoveStationItemInput>;
 
 /**
  * Add tracks to the running order now, rather than waiting for it to run short
- * generated from [ExtendStationInput](../../../../data/contracts/director/director.types.ck#L113)
+ * generated from [ExtendStationInput](../../../../data/contracts/director/director.types.ck#L115)
  */
 export const ExtendStationInput = z.strictObject({
     count: z.preprocess(v => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v), z.number().int().min(1).max(100)).optional(),
@@ -118,7 +118,7 @@ export type ExtendStationInput = z.infer<typeof ExtendStationInput>;
 
 /**
  * Throw away everything the player is not already holding and programme it again. Unlike a shuffle, the records themselves change; unlike putting the station on air, the broadcast continues
- * generated from [ReplanStationInput](../../../../data/contracts/director/director.types.ck#L117)
+ * generated from [ReplanStationInput](../../../../data/contracts/director/director.types.ck#L119)
  */
 export const ReplanStationInput = z.strictObject({
     count: z
@@ -184,7 +184,7 @@ export type StationAir = z.infer<typeof StationAir>;
 
 /**
  * Put the station on air, building its running order from the top
- * generated from [PutOnAirInput](../../../../data/contracts/director/director.types.ck#L79)
+ * generated from [PutOnAirInput](../../../../data/contracts/director/director.types.ck#L80)
  */
 export const PutOnAirInput = z.strictObject({
     pluginId: z
@@ -254,6 +254,12 @@ export const PutOnAirInput = z.strictObject({
         .describe(
             "Whether somebody phones in during this broadcast. A call is a short programme rather than a break: a few turns in a few voices, entering the running order as one block, spaced by `rotation.callinEveryMinutes`. Absent takes the station's own setting, which is off",
         ),
+    mixInSimilar: z
+        .preprocess(v => (v === 'true' ? true : v === 'false' ? false : v), z.boolean())
+        .optional()
+        .describe(
+            "Whether records that sound like the ones on this playlist are mixed in among them, one every `rotation.mixInEvery` records, found through the similarity plugin. The playlist still plays in full and in its own order around them. Absent takes the station's own setting, which is off. A setlist and a feature never have anything mixed in",
+        ),
     mode: StationMode.optional(),
     onEnd: StationOnEnd.optional(),
 });
@@ -293,6 +299,12 @@ export const StationOrderItem = z.strictObject({
     rating: Rating.optional().describe(
         'What the station thinks of this record, read as the order is drawn rather than stored on it. Absent on a segment, and on a record the catalog has never seen',
     ),
+    mixedIn: z
+        .preprocess(v => (v === 'true' ? true : v === 'false' ? false : v), z.boolean())
+        .optional()
+        .describe(
+            'The station chose this record to sound like the playlist around it, rather than the playlist naming it. Absent on everything the playlist named, and on a segment',
+        ),
     segmentId: z.string().min(1).max(100).optional().describe('Which segment this plays. Present only on a segment'),
     segmentState: z.enum(['planned', 'writing', 'written', 'rendering', 'ready', 'failed', 'gone']).optional(),
     playable: z
@@ -316,7 +328,7 @@ export type StationOrderItem = z.infer<typeof StationOrderItem>;
 
 /**
  * The station's live running order: what is airing, item by item
- * generated from [StationOrder](../../../../data/contracts/director/director.types.ck#L65)
+ * generated from [StationOrder](../../../../data/contracts/director/director.types.ck#L66)
  */
 export const StationOrder = z.strictObject({
     name: z.string().max(200).describe('What is on, for a console to draw. A label for this broadcast rather than the name of a stored object'),

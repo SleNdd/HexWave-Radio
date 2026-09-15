@@ -176,6 +176,8 @@ data class PutOnAirInput(
     val eraTo: Long? = null,
     /** Whether somebody phones in during this broadcast. A call is a short programme rather than a break: a few turns in a few voices, entering the running order as one block, spaced by `rotation.callinEveryMinutes`. Absent takes the station's own setting, which is off */
     val callins: Boolean? = null,
+    /** Whether records that sound like the ones on this playlist are mixed in among them, one every `rotation.mixInEvery` records, found through the similarity plugin. The playlist still plays in full and in its own order around them. Absent takes the station's own setting, which is off. A setlist and a feature never have anything mixed in */
+    val mixInSimilar: Boolean? = null,
     val mode: StationMode? = null,
     val onEnd: StationOnEnd? = null,
 )
@@ -208,6 +210,8 @@ data class StationOrderItem(
     val albumId: String? = null,
     /** What the station thinks of this record, read as the order is drawn rather than stored on it. Absent on a segment, and on a record the catalog has never seen */
     val rating: Rating? = null,
+    /** The station chose this record to sound like the playlist around it, rather than the playlist naming it. Absent on everything the playlist named, and on a segment */
+    val mixedIn: Boolean? = null,
     /** Which segment this plays. Present only on a segment */
     val segmentId: String? = null,
     val segmentState: StationOrderItemSegmentState? = null,
