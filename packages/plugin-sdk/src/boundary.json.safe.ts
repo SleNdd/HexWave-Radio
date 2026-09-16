@@ -39,6 +39,14 @@
 import type { AnalysisRef, TrackAnalysis, TrackCuePoints, TrackLoudness, TrackTaggedLoudness } from './capabilities/analysis.js';
 import type { AudioJoin, AudioOverlay } from './capabilities/mixer.js';
 import type { ChartDescriptor, ChartEntry, ChartQuery } from './capabilities/charts.js';
+import type {
+    NarrationPart,
+    NarrationPiece,
+    NarrationPiecesQuery,
+    NarrationSeries,
+    NarrationText,
+    NarrationTextQuery,
+} from './capabilities/narration.js';
 import type { NewsFeedDescriptor, NewsItem, NewsQuery } from './capabilities/news.js';
 import type {
     PodcastAudio,
@@ -73,7 +81,7 @@ import type {
     SearchTracksOptions,
 } from './capabilities/music.provider.js';
 import type { LlmMessage, LlmModelInfo, LlmRequest, LlmResult, LlmToolCall, LlmToolDeclaration, LlmUsage } from './capabilities/llm.js';
-import type { SpeechRequest, SpeechVoice } from './capabilities/speech.js';
+import type { SpeechLimits, SpeechRequest, SpeechVoice } from './capabilities/speech.js';
 import type { ConfigField, ConfigFieldColumn, ConfigFieldOption } from './plugin.config.fields.js';
 import type { PlaylistTracksRequest, TrackFetchRequest, TrackFetchSession } from './plugin.host.js';
 import type { PluginConnectionResult } from './plugin.lifecycle.js';
@@ -196,6 +204,12 @@ export type AssertAllBoundaryPayloadsAreJsonSafe = AssertAllTrue<{
     NewsFeedDescriptor: IsJsonSafe<NewsFeedDescriptor>;
     NewsQuery: IsJsonSafe<NewsQuery>;
     NewsItem: IsJsonSafe<NewsItem>;
+    NarrationSeries: IsJsonSafe<NarrationSeries>;
+    NarrationPiece: IsJsonSafe<NarrationPiece>;
+    NarrationPart: IsJsonSafe<NarrationPart>;
+    NarrationText: IsJsonSafe<NarrationText>;
+    NarrationPiecesQuery: IsJsonSafe<NarrationPiecesQuery>;
+    NarrationTextQuery: IsJsonSafe<NarrationTextQuery>;
     PodcastShow: IsJsonSafe<PodcastShow>;
     PodcastAudio: IsJsonSafe<PodcastAudio>;
     PodcastEpisode: IsJsonSafe<PodcastEpisode>;
@@ -213,6 +227,7 @@ export type AssertAllBoundaryPayloadsAreJsonSafe = AssertAllTrue<{
     ScrobblePlay: IsJsonSafe<ScrobblePlay>;
     ScrobbleRejection: IsJsonSafe<ScrobbleRejection>;
     ScrobbleResult: IsJsonSafe<ScrobbleResult>;
+    SpeechLimits: IsJsonSafe<SpeechLimits>;
 }>;
 
 /**
@@ -271,6 +286,12 @@ export const JSON_SAFE_PAYLOAD_TYPES = [
     'NewsFeedDescriptor',
     'NewsQuery',
     'NewsItem',
+    'NarrationSeries',
+    'NarrationPiece',
+    'NarrationPart',
+    'NarrationText',
+    'NarrationPiecesQuery',
+    'NarrationTextQuery',
     'PodcastShow',
     'PodcastAudio',
     'PodcastEpisode',
@@ -288,6 +309,7 @@ export const JSON_SAFE_PAYLOAD_TYPES = [
     'ScrobblePlay',
     'ScrobbleRejection',
     'ScrobbleResult',
+    'SpeechLimits',
 ] as const;
 
 /**
@@ -321,6 +343,7 @@ export const BOUNDARY_METHOD_TYPES = [
     'MixerProvider',
     'ChartsProvider',
     'NewsProvider',
+    'NarrationProvider',
     'PodcastProvider',
     'SimilarityProvider',
     'SearchProvider',

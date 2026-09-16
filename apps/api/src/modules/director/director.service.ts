@@ -17,6 +17,9 @@ import { PersonaRepository } from '#modules/personas/persona.repository.js';
 import type { Persona } from '#modules/personas/persona.js';
 import { ProductionRepository } from '#modules/productions/production.repository.js';
 import { ProductionScheduler } from '#modules/productions/production.scheduler.js';
+import { NarrationPieceRepository } from '#modules/narrations/narration.piece.repository.js';
+import { NarrationScheduler } from '#modules/narrations/narration.scheduler.js';
+import { isNarrationKind } from '#modules/narrations/narration.kind.js';
 import { PodcastEpisodeRepository } from '#modules/podcasts/podcast.episode.repository.js';
 import { PodcastScheduler } from '#modules/podcasts/podcast.scheduler.js';
 import { SegmentRepository, type Segment } from '#modules/render/segment.repository.js';
@@ -1011,6 +1014,13 @@ export class DirectorService {
                         continue;
                     }
 
+                    // A reading is CARRIED rather than dropped into the next gap: an operator gave it
+                    // a time, and `BreakPlanner` plants it at that band exactly as it plants an
+                    // episode of somebody else's podcast. So it is stitched here, like every other
+                    // production, and then left `ready` for its slot rather than placed. The
+                    // narrations sweep picks it up from there and hands it to its piece.
+                    if (isNarrationKind(production.kind)) continue;
+
                     const at = this.slotForProduction(lineup);
                     // No room yet. Left `ready` rather than failed: the audio still exists, and the
                     // next pass has a longer order to put it in.
@@ -1026,12 +1036,16 @@ export class DirectorService {
                     // break — `releaseUnheardProductions` hands back an episode a changeover never
                     // played, and `remove` takes a block out whole — and a joined production placed
                     // as a bare segment would be invisible to all of it.
-                    const result = lineup.insertGroup(
-                        production.id,
-                        joined === undefined ? beats.map(beat => beat.id) : [joined.id],
-                        at,
-                        production.kind,
-                    );
+                    // Each member with whatever length the row knows. The joined row has one the
+                    // mixer measured, which is the whole point: a ten-minute programme planted
+                    // without it projects as zero airtime and every band behind it is planned on
+                    // top of it. A beat has none, since `RenderSegmentJob` records no duration, so
+                    // the unjoined fallback projects as it always did.
+                    const members =
+                        joined === undefined
+                            ? beats.map(beat => ({ segmentId: beat.id, ...(beat.durationMs === undefined ? {} : { durationMs: beat.durationMs }) }))
+                            : [{ segmentId: joined.id, ...(joined.durationMs === undefined ? {} : { durationMs: joined.durationMs }) }];
+                    const result = lineup.insertGroup(production.id, members, at, production.kind);
                     if (!result.ok) continue;
 
                     await productions.moveTo(production.id, 'aired', 'ready');
@@ -1916,6 +1930,14 @@ export class DirectorService {
         await inScope(this.container, async scope => {
             await scope.get(PodcastScheduler).ripen(Date.now());
         }).catch(error => this.logger.warn(`director: could not fetch the programmes the clock will carry (${errorText(error)})`));
+
+        // And the same again for a band the station READS: the words are spoken hours ahead, because
+        // a chapter is several takes on the one speech engine rather than one download. This pass is
+        // also where a reading that has finished being spoken is handed to the piece that asked for
+        // it, which is why it runs even on a station whose clock is quiet.
+        await inScope(this.container, async scope => {
+            await scope.get(NarrationScheduler).ripen(Date.now());
+        }).catch(error => this.logger.warn(`director: could not make the readings the clock will carry (${errorText(error)})`));
 
         // BEFORE committing, so a break planted this pass is in the order before anything is
         // taken from it. The other way round, the tail would be topped up first and the break
@@ -3010,9 +3032,15 @@ export class DirectorService {
         // show would carry it again tomorrow. Written on this edge because this is the moment a
         // listener could first have heard it, and `void`ed on the same terms as the history row.
         if (isRenderItem(item) && item.programme === true) {
-            void inScope(this.container, async scope => scope.get(PodcastEpisodeRepository).markAired(item.externalId, Date.now())).catch(error =>
-                this.logger.warn(`director: could not mark a programme aired (${errorText(error)})`),
-            );
+            // Both kinds of programme, and both marks are keyed on the SEGMENT that played, so each
+            // is a no-op for the other's rows: one statement matching nothing is cheaper than asking
+            // first which sort of programme this was. For a reading the mark is also the station's
+            // place in the book, which is what stops a serial reading chapter four forever.
+            void inScope(this.container, async scope => {
+                const at = Date.now();
+                await scope.get(PodcastEpisodeRepository).markAired(item.externalId, at);
+                await scope.get(NarrationPieceRepository).markAired(item.externalId, at);
+            }).catch(error => this.logger.warn(`director: could not mark a programme aired (${errorText(error)})`));
         }
         if (isRenderItem(item)) return;
 
