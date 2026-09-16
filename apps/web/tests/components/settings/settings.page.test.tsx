@@ -79,6 +79,7 @@ const SETTINGS: StationSettings = {
         'playout.airMode': 'audience',
     },
     configured: { 'mail.password': true },
+    derived: {},
 };
 
 const settingsOf = (overrides: Partial<StationSettings> = {}): StationSettings => ({ ...SETTINGS, ...overrides });
@@ -117,6 +118,25 @@ describe('SettingsSectionPage', () => {
 
         expect(await screen.findByLabelText('Bitrate (kbps)')).toHaveValue('192');
         expect(screen.queryByLabelText('Station name')).not.toBeInTheDocument();
+    });
+
+    it('hands the form what an empty setting works out to', async () => {
+        // The station works these out, because two of the three come from the environment it was
+        // deployed with and one from the server's clock. How the form DRAWS one is
+        // `config.fields.derived.test.tsx`; what is pinned here is that the page passes it on, which
+        // is the one link in the chain that is a single prop and would go unnoticed.
+        getSettings.mockResolvedValue(
+            settingsOf({
+                descriptors: [{ group: 'stream', key: 'stream.publicUrl', label: 'Public URL', type: 'url', default: '' }],
+                values: { 'stream.publicUrl': '' },
+                derived: { 'stream.publicUrl': 'https://radio.example' },
+            }),
+        );
+
+        render(<SettingsSectionPage section="stream" />);
+
+        expect(await screen.findByLabelText('Public URL')).toHaveAttribute('placeholder', 'https://radio.example');
+        expect(screen.getByText('Using https://radio.example while this is empty.')).toBeInTheDocument();
     });
 
     it('never puts a stored secret on the screen', async () => {
