@@ -21,10 +21,15 @@
 //
 //	serve (default)   listen on -addr, answering GET /track/{id}?t=<signed>
 //	one-shot (-uri)   fetch a single track to a file, for debugging a login or a track by hand
+//
+// `-playlist` is the one-shot's sibling for a PLAYLIST: it resolves one through the client protocol
+// and prints the tracks as JSON, which is how `GET /playlist/{id}` was measured before it existed.
+// See playlist.go for why that read works where the Web API refuses.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -54,6 +59,8 @@ func main() {
 	bitrate := flag.Int("bitrate", envIntOr("SHIM_BITRATE", 320), "preferred bitrate; the nearest available Ogg file is used")
 	fetchTimeout := flag.Duration("fetch-timeout", 90*time.Second, "how long one track fetch may take")
 	uri := flag.String("uri", "", "one-shot mode: fetch this track and exit")
+	playlist := flag.String("playlist", "", "one-shot mode: resolve this playlist's tracks, print them as JSON, and exit")
+	limit := flag.Int("limit", 0, "with -playlist: describe at most this many tracks (0 for all of them)")
 	out := flag.String("o", "", "one-shot mode: output file (default stdout)")
 	sign := flag.String("sign", "", "print a signed URL path for this track id and exit")
 	verbose := flag.Bool("v", false, "log go-librespot's own chatter")
@@ -64,6 +71,7 @@ func main() {
 		username: *username, token: *token,
 		credentials: *credentials, callbackURL: *callbackURL,
 		uri: *uri, out: *out, sign: *sign,
+		playlist: *playlist, limit: *limit,
 		bitrate: *bitrate, fetchTimeout: *fetchTimeout, verbose: *verbose,
 	}
 	if err := run(cfg); err != nil {
@@ -80,6 +88,8 @@ type options struct {
 	username, token          string
 	credentials, callbackURL string
 	uri, out, sign           string
+	playlist                 string
+	limit                    int
 	bitrate                  int
 	fetchTimeout             time.Duration
 	verbose                  bool
@@ -113,6 +123,7 @@ func run(cfg options) error {
 			log:         log,
 			client:      client,
 		},
+		playlists:    newPlaylistCache(),
 		bitrate:      cfg.bitrate,
 		fetchTimeout: cfg.fetchTimeout,
 	}
@@ -130,6 +141,8 @@ func run(cfg options) error {
 		}
 		fmt.Printf("/track/%s?t=%s\n", cfg.sign, signToken(cfg.secret, cfg.sign, time.Now().Add(tokenTTL)))
 		return nil
+	case cfg.playlist != "":
+		return resolveOnce(srv, cfg.playlist, cfg.out, cfg.limit)
 	case cfg.uri != "":
 		return fetchOnce(srv, cfg.uri, cfg.out)
 	default:
@@ -200,9 +213,8 @@ func serve(srv *server, addr string, log librespot.Logger) error {
 	return nil
 }
 
-// One-shot: fetch a track and write it out. This is the path the Phase 0 spike proved, kept as an
-// operator tool for answering "is the login working, and is this track fetchable?" without
-// involving Liquidsoap or the app.
+// One-shot: fetch a track and write it out. An operator tool for answering "is the login working,
+// and is this track fetchable?" without involving Liquidsoap or the app.
 func fetchOnce(srv *server, uri, out string) error {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), srv.fetchTimeout)
@@ -233,6 +245,66 @@ func fetchOnce(srv *server, uri, out string) error {
 	// The number the whole design hangs on: a track has to arrive comfortably faster than it
 	// plays, or Liquidsoap cannot download it ahead of air.
 	fmt.Fprintf(os.Stderr, "shim: wrote %d bytes in %s (%.1f Mbit/s)\n", copied, elapsed.Round(time.Millisecond), float64(copied*8)/elapsed.Seconds()/1e6)
+	return nil
+}
+
+// Resolve one playlist and print what came back.
+//
+// Writes JSON to stdout (or -o) and the timings to stderr. The same read `GET /playlist/{id}`
+// serves, with no secret and no HTTP in the way, which is what makes it the tool for answering
+// "can this account read that playlist at all?" on a container where nothing else is running.
+func resolveOnce(srv *server, uri, out string, limit int) error {
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), srv.fetchTimeout)
+	defer cancel()
+
+	// `limit` is the one thing the one-shot does that the route cannot: probing a 2000-track
+	// playlist without describing all of it. A limited read is never cached, since it is not the
+	// whole playlist and a later page would read past its end.
+	var answer *playlistAnswer
+	var err error
+	if limit > 0 {
+		var sess *session
+		if sess, err = srv.sessions.get(ctx); err == nil {
+			answer, err = sess.resolvePlaylist(ctx, srv.log, uri, limit)
+		}
+	} else {
+		answer, err = srv.resolveWithRetry(ctx, uri)
+	}
+	if err != nil {
+		return err
+	}
+
+	sink := io.Writer(os.Stdout)
+	if out != "" {
+		f, err := os.Create(out)
+		if err != nil {
+			return fmt.Errorf("failed creating %s: %w", out, err)
+		}
+		defer func() { _ = f.Close() }()
+		sink = f
+	}
+
+	encoder := json.NewEncoder(sink)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(answer); err != nil {
+		return fmt.Errorf("failed writing the answer: %w", err)
+	}
+
+	playable := 0
+	failed := 0
+	for _, track := range answer.Tracks {
+		if track.Playable {
+			playable++
+		}
+		if track.Error != "" {
+			failed++
+		}
+	}
+	// The three numbers worth reading: did it resolve at all, did the titles come back, and was it
+	// quick enough that the route serving this can be walked page by page.
+	fmt.Fprintf(os.Stderr, "shim: %d tracks over %d page(s): resolve %dms, metadata %dms, %d playable, %d without metadata (total %s)\n",
+		answer.Total, answer.Pages, answer.ResolveMs, answer.MetadataMs, playable, failed, time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
