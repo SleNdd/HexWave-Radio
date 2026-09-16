@@ -21,7 +21,11 @@ a `.env` ENABLED the bypass and only the positive `NODE_ENV` allowlist beside it
 `modules/shared/setting.flags.ts` owns the vocabulary now (`true/1/yes/on`, `false/0/no/off`, anything else
 and the empty string take the declared default rather than `false`, because a value nobody can parse is a
 setting nobody set). Numbers have the same problem and the same shape of answer: `resolveAnalysisConcurrency`,
-`resolveRetentionDays`, `maxOutputTokens`.
+`resolveRetentionDays`, `maxOutputTokens`. **The two connection ports are the version of this that hid
+longest**: `DATABASE_PORT` and `REDIS_PORT` were read as `config.get(key, 5432)`, which types as
+`number` and answers the string, and both drivers coerce it, so the only visible symptom was the one
+nobody saw: a typo became `NaN`, which `pg` reads as a port nobody set and answers with its own 5432.
+Both go through `requiredNumber` now, in `database.connection.ts` and `redis.connection.ts`.
 
 **A test that hands over a real boolean proves nothing here** — it passes either way — so a switch's off-case
 is tested with the string, and a config double that coerces on the way out is worse than no double at all:
@@ -97,6 +101,19 @@ operator a session with no actor. The API rejects that state rather than trustin
 `authorization.context.middleware` for authenticated requests and in
 `AuthenticationService.revokeIfSubjectIsGone` for the refresh grant, both of which revoke the
 session and answer 401 instead of letting it through as a user who holds no permissions.
+
+**One Redis client, and `resolveRedisConnection` decides what it connects as.** Both rate limiters,
+`SignInMailLimiter`, `IoRedisCacheProvider` and the session store all resolve the single `Redis`
+singleton `DataModule` registers, so there is exactly one place to configure and no second client to
+forget. Until [#160](https://github.com/robert-dean/deadair/issues/160) that place read `REDIS_HOST`
+and `REDIS_PORT` and nothing else, so a Redis wanting `AUTH` could not be pointed at and the reporter
+ran a second daemon instead. `redis.connection.ts` now reads `REDIS_USERNAME`, `REDIS_PASSWORD` and
+`REDIS_TLS` beside them, and accepts `REDIS_URL` as an alternative that **wins whole**: when it is
+set, none of the five discrete variables is consulted, because a merge produces a station connecting
+to the right host as the wrong user, and the `full` image fills the loopback defaults in itself (its
+`database-env` now skips them when a URL is set, which is what makes that rule load-bearing rather
+than tidy). A URL that cannot be parsed stops the boot, on `requiredNumber`'s rule, and no error
+message here ever quotes the value, because a Redis URL carries the password.
 
 ## Module lifecycle
 
