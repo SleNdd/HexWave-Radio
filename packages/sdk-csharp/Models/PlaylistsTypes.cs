@@ -118,6 +118,16 @@ public sealed record CatalogPlaylist
     [JsonPropertyName("permissions")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PlaylistPermission>? Permissions { get; init; }
+
+    /// <summary>The source made this playlist itself rather than a person: an editorial list, or one generated for the account like Discover Weekly. Absent when it did not say</summary>
+    [JsonPropertyName("madeByProvider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MadeByProvider { get; init; }
+
+    /// <summary>An operator hid this playlist from this station, so pickers leave it out and the library sync does not read it. Absent when it is not hidden</summary>
+    [JsonPropertyName("hidden")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Hidden { get; init; }
 }
 
 public sealed record CatalogPlaylistTracks
