@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+    <!-- The picture a news break wears. Drawn for this repository; see MANIFEST.json.
+
+         A front page, with the station's own mark as the photograph on it — the same move
+         `weather.svg` makes with the cloud, which is what keeps the two a set. A sheet rather than a
+         microphone or a mast: both of those read as "the station is talking", which is every other
+         kind of break.
+
+         The masthead and the columns are cut OUT of the ink in the field colour, so the whole thing
+         still reads at the 28 pixels a running-order row draws it at. `news.png` beside this is what
+         ships, rasterised the way `weather.svg` says. -->
+    <defs>
+        <!-- No rotation on the clip itself: what it clips sits INSIDE the rotated group, so the clip
+             resolves in that group's space and turning it here would turn it twice. -->
+        <clipPath id="plate">
+            <rect x="124" y="206" width="132" height="116" rx="10"/>
+        </clipPath>
+    </defs>
+
+    <rect width="512" height="512" fill="#2ED88B"/>
+
+    <g transform="rotate(-6 256 256)">
+        <rect x="100" y="126" width="312" height="268" rx="18" fill="#121514"/>
+        <rect x="124" y="152" width="264" height="34" rx="9" fill="#2ED88B"/>
+        <!-- The plate is its own shape rather than the mark's own field, which is also why this
+             reads the TRANSPARENT copy of the mark where the rest of the tree reaches for the opaque
+             one: the photograph is turned inside the plate, and a square field turned inside it
+             leaves the plate's corners showing as ink. -->
+        <rect x="124" y="206" width="132" height="116" rx="10" fill="#2ED88B"/>
+        <g clip-path="url(#plate)">
+            <!-- No turn of its own: the photograph lies square on the page, and the page carries
+                 the six degrees.
+
+                 It used to carry an extra two on top of a page at four, and the reason is worth
+                 keeping because it is the trap: the mark is very nearly symmetrical, so four degrees
+                 of it is invisible beside a rectangle at the same four, and a photograph matching
+                 its page exactly read as upright. Turning the PAGE further is the better answer to
+                 that than turning the photograph on it — ten past the page looked like something
+                 stuck on crooked, and even five past was too far.
+
+                 Sized to fit WITHIN the plate rather than to its width: the plate is wider than it
+                 is tall and the mark is square, so a head matched to the width is cropped top and
+                 bottom and reads as a photograph nobody framed. -->
+            <image
+                href="../../../apps/android/app/src/main/res/drawable-xxhdpi/ic_launcher_foreground.png"
+                x="102.9"
+                y="176.9"
+                width="174.7"
+                height="174.7"
+            />
+        </g>
+        <g fill="#2ED88B">
+            <rect x="276" y="206" width="112" height="17" rx="8"/>
+            <rect x="276" y="239" width="112" height="17" rx="8"/>
+            <rect x="276" y="272" width="112" height="17" rx="8"/>
+            <rect x="276" y="305" width="112" height="17" rx="8"/>
+            <rect x="124" y="338" width="264" height="17" rx="8"/>
+        </g>
+    </g>
+</svg>
