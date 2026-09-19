@@ -1,6 +1,8 @@
 package com.maroonedsoftware.deadair
 
+import android.content.Intent
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -27,11 +29,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.maroonedsoftware.deadair.auth.SessionState
 import com.maroonedsoftware.deadair.nowplaying.NowPlayingState
 import com.maroonedsoftware.deadair.playback.PlayerConnection
 import com.maroonedsoftware.deadair.playback.playOnOpen
+import com.maroonedsoftware.deadair.station.StationLink
 import com.maroonedsoftware.deadair.ui.nowplaying.rememberPlayWithNotificationsAsked
+import com.maroonedsoftware.deadair.ui.add.AddRecordRoute
 import com.maroonedsoftware.deadair.ui.air.AirSomethingRoute
 import com.maroonedsoftware.deadair.ui.air.ChartRoute
 import com.maroonedsoftware.deadair.ui.air.PlaylistRoute
@@ -51,9 +56,18 @@ import com.maroonedsoftware.deadair.ui.text.LocalUses24HourClock
 import com.maroonedsoftware.deadair.ui.theme.DeadairTheme
 
 class MainActivity : ComponentActivity() {
+    /**
+     * A `deadair://` link waiting to be offered. Set from the intent that launched the activity and
+     * from every one after it (`singleTask` delivers those to `onNewIntent`), and cleared once shown.
+     */
+    private val links = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Not on a restore: the launching intent is still attached after a rotation, and offering its
+        // link again would reopen a question the listener has already answered.
+        if (savedInstanceState == null) links.value = linkIn(intent)
         val graph = (application as DeadairApp).graph
         setContent {
             // The theme reads the one setting it depends on straight from the store, above the
@@ -64,11 +78,19 @@ class MainActivity : ComponentActivity() {
             // `android.text.format` and everything that writes a time agrees.
             CompositionLocalProvider(LocalUses24HourClock provides DateFormat.is24HourFormat(this)) {
                 DeadairTheme(dynamicColour = settings?.dynamicColour ?: true) {
-                    Listener(graph)
+                    Listener(graph, links)
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        linkIn(intent)?.let { links.value = it }
+    }
+
+    private fun linkIn(intent: Intent?): String? = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString
 }
 
 /**
@@ -80,7 +102,7 @@ class MainActivity : ComponentActivity() {
  * lives with that screen.
  */
 @Composable
-private fun Listener(graph: AppGraph) {
+private fun Listener(graph: AppGraph, links: MutableStateFlow<String?>) {
     val model: SettingsViewModel =
         viewModel(
             factory =
@@ -95,6 +117,8 @@ private fun Listener(graph: AppGraph) {
     val entry by model.entry.collectAsStateWithLifecycle()
     val session by model.session.collectAsStateWithLifecycle()
     val account by model.account.collectAsStateWithLifecycle()
+    val proposal by model.proposal.collectAsStateWithLifecycle()
+    val link by links.collectAsStateWithLifecycle()
 
     // Keyed on the session so it fires on a cold start with a session already on disk and again
     // after a sign-in, and not on a rotation. What it learns is which controls to draw.
@@ -133,16 +157,32 @@ private fun Listener(graph: AppGraph) {
     // Until the first read from disk lands there is no answer, and the honest thing to draw is
     // nothing: the launch window is still on screen, and drawing Setup for the few frames before
     // the station arrives was a flash of the wrong screen on every cold start.
+    //
+    // A `deadair://` link is the one thing that shows Setup over a kept station, and only ever
+    // PROPOSES: the kept station, its session and what is playing stay until the new address has
+    // answered and somebody has pressed Listen. Offered once the settings are read, because a link
+    // that launched the app arrives before them and "is this the station I have" needs both.
     val loaded = settings
     val station = loaded?.station
+    LaunchedEffect(link, loaded != null) {
+        val text = link ?: return@LaunchedEffect
+        if (loaded == null) return@LaunchedEffect
+        links.value = null
+        StationLink.parse(text)?.let { model.propose(it, station) }
+    }
+    val keepCurrent = { model.keepCurrent(station) }
+    BackHandler(enabled = proposal != null && station != null, onBack = keepCurrent)
+
     if (loaded == null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
-    } else if (station == null) {
+    } else if (station == null || proposal != null) {
         SetupScreen(
             state = entry,
             onAddressChange = model::onAddressChange,
             onCheck = model::check,
             onConfirm = model::confirm,
+            listeningTo = if (proposal != null) station?.let { loaded.stationName ?: it.origin } else null,
+            onKeepCurrent = if (proposal != null && station != null) keepCurrent else null,
         )
     } else {
         NavDisplay(
@@ -163,6 +203,7 @@ private fun Listener(graph: AppGraph) {
                             },
                             onTrack = { id -> backStack.add(Destination.Track(id)) },
                             onAirSomething = { backStack.add(Destination.AirSomething) },
+                            onAddRecord = { backStack.add(Destination.AddRecord) },
                             onScripts = { segmentId -> backStack.add(Destination.Scripts(segmentId)) },
                             onPlan = { currentBrief, somethingOn -> backStack.add(Destination.Plan(currentBrief, somethingOn)) },
                         )
@@ -196,6 +237,9 @@ private fun Listener(graph: AppGraph) {
                             onPlaylist = { pluginId, playlistId -> backStack.add(Destination.Playlist(pluginId, playlistId)) },
                             onChart = { id -> backStack.add(Destination.Chart(id)) },
                         )
+                    }
+                    entry<Destination.AddRecord> {
+                        AddRecordRoute(graph = graph, onBack = { backStack.removeLastOrNull() })
                     }
                     // Airing something ends the errand: the stack unwinds to Home, where the
                     // transport shows what just happened.

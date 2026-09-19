@@ -18,6 +18,11 @@
 
     <!-- Now playing -->
     <string name="now_warming_up">Warming up</string>
+
+    <!-- The Quick Settings tile's second line -->
+    <string name="tile_on">On</string>
+    <string name="tile_off">Off</string>
+    <string name="tile_choose_station">Choose a station first</string>
     <string name="now_off_air">Off air</string>
     <string name="now_cant_reach">Can\'t reach the station</string>
     <string name="now_quiet_until_someone_tunes_in">Quiet until someone tunes in — press play to start it.</string>
@@ -62,6 +67,9 @@
     <string name="station_address_example">https://radio.example.com</string>
     <string name="check">Check</string>
     <string name="listen_to">Listen to %1$s</string>
+    <!-- Shown when a deadair:// link proposes a station while another is kept. %1$s is the kept station. -->
+    <string name="setup_link_note">You are listening to %1$s. Check this address and listen to it to switch; nothing changes until you do.</string>
+    <string name="keep_current_station">Keep the station I have</string>
     <string name="use_station">Use %1$s</string>
     <string name="station_answered_as">Answered as %1$s</string>
     <string name="station_not_encrypted">Not encrypted. Ordinary on a home network, where the station has no certificate.</string>
@@ -178,6 +186,8 @@
     <string name="notice_nothing_to_resume">Nothing to resume: the station has not been put on air yet.</string>
     <string name="notice_playlist_empty">That playlist has nothing the station can play.</string>
     <string name="notice_host_gone">That persona is no longer on the station.</string>
+    <string name="notice_record_gone">The station no longer has that record.</string>
+    <string name="notice_record_refused">The station will not play that record now.</string>
     <string name="notice_could_not_reach">Could not reach the station to do that.</string>
     <string name="notice_failed">The station refused that (%1$d).</string>
 
@@ -223,6 +233,7 @@
     <string name="refill_asked">Refill asked for. The records land in a few seconds.</string>
     <string name="row_actions">Actions for %1$s</string>
     <string name="play_next">Play next</string>
+    <string name="add_to_end">Add to the end</string>
     <string name="move_up">Move up</string>
     <string name="move_down">Move down</string>
     <string name="drop">Drop</string>
@@ -288,6 +299,20 @@
 
     <!-- Airing a playlist or a chart -->
     <string name="air_something">Air something</string>
+
+    <!-- Adding one record from the library -->
+    <string name="add_a_record">Add a record</string>
+    <!-- The station's search matches titles only, so the label says so rather than promising artists. -->
+    <string name="search_by_title">Search by title</string>
+    <string name="search_prompt">Type two letters or more of a record\'s title.</string>
+    <string name="search_nothing_found">Nothing in the library matches that.</string>
+    <string name="record_not_here_yet">Not on this station yet, so it cannot be added</string>
+    <string name="add_this_record">Add “%1$s”</string>
+    <string name="record_added">Added “%1$s”.</string>
+    <plurals name="search_not_shown">
+        <item quantity="one">%1$d more match. Type more of the title to find it.</item>
+        <item quantity="other">%1$d more matches. Type more of the title to narrow them.</item>
+    </plurals>
     <string name="air_something_intro">Putting one of these on air replaces the running order and goes out to every listener.</string>
     <string name="air_nothing_offered">No plugin offers a playlist or a chart.</string>
     <!-- A plugin that could not be asked: "spotify: token expired" -->

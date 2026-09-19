@@ -27,8 +27,9 @@ import kotlinx.serialization.modules.subclass
  *
  * `Home` is the tabbed part and is one entry rather than several: the tabs share a frame and
  * switching between them is not leaving the screen. Setup is deliberately NOT a destination. It is
- * derived from there being no station yet, so it is chosen above the stack rather than pushed onto
- * it — a place you cannot navigate back to.
+ * derived from there being no station yet, or a `deadair://` link proposing one, so it is chosen
+ * above the stack rather than pushed onto it — a place you cannot navigate back to. Back from a
+ * link's Setup is "keep the station I have", which is the one way out of it that changes nothing.
  */
 sealed interface Destination : NavKey {
     @Serializable
@@ -51,6 +52,10 @@ sealed interface Destination : NavKey {
     /** Everything that could be put on air. Operator only; reached from the Up next tab. */
     @Serializable
     data object AirSomething : Destination
+
+    /** Find a record in the library and put it in the running order. Operator only; reached from the Up next tab. */
+    @Serializable
+    data object AddRecord : Destination
 
     @Serializable
     data class Playlist(val pluginId: String, val playlistId: String) : Destination
@@ -91,6 +96,7 @@ val NavConfiguration: SavedStateConfiguration =
                     subclass(Destination.Album::class)
                     subclass(Destination.Artist::class)
                     subclass(Destination.AirSomething::class)
+                    subclass(Destination.AddRecord::class)
                     subclass(Destination.Playlist::class)
                     subclass(Destination.Chart::class)
                     subclass(Destination.Scripts::class)
