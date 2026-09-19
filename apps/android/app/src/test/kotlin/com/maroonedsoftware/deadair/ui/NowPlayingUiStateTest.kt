@@ -4,11 +4,12 @@ import com.maroonedsoftware.deadair.nowplaying.AirState
 import com.maroonedsoftware.deadair.sdk.models.NowPlayingShow
 import com.maroonedsoftware.deadair.sdk.models.NowPlayingTrack
 import com.maroonedsoftware.deadair.sdk.models.NowPlayingTrackKind
-import com.maroonedsoftware.deadair.station.StreamFormat
 import com.maroonedsoftware.deadair.ui.nowplaying.NowPlayingUiState
 import com.maroonedsoftware.deadair.ui.text.Message
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -20,14 +21,11 @@ import org.junit.Test
  * must not be the fault message.
  */
 class NowPlayingUiStateTest {
-    private fun state(air: AirState, listeners: Long = 0, stale: Boolean = false, fellBack: Boolean = false, show: NowPlayingShow? = null) =
+    private fun state(air: AirState, stale: Boolean = false, show: NowPlayingShow? = null, playing: Boolean = false, buffering: Boolean = false) =
         NowPlayingUiState(
             air = air,
-            listeners = listeners,
-            format = StreamFormat.MP3,
-            playing = false,
-            buffering = false,
-            fellBackToMp3 = fellBack,
+            playing = playing,
+            buffering = buffering,
             stale = stale,
             show = show,
         )
@@ -70,20 +68,6 @@ class NowPlayingUiStateTest {
         assertEquals(Message.CantReachStation, state(AirState.Unreachable, stale = true).title)
         assertEquals(Message.ShowingLastSaid, state(AirState.Unreachable, stale = true).subtitle)
         assertNull(state(AirState.Unreachable, stale = false).subtitle)
-    }
-
-    @Test
-    fun `hands the listener count to the language to count`() {
-        // The plural forms are the resource's job: a language with three of them cannot be served
-        // by a `when` on zero, one and many written in Kotlin.
-        assertEquals(Message.Listeners(0, StreamFormat.MP3), state(AirState.OffAir, listeners = 0).footer)
-        assertEquals(Message.Listeners(12, StreamFormat.MP3), state(AirState.OffAir, listeners = 12).footer)
-    }
-
-    @Test
-    fun `notes the fallback only when it happened`() {
-        assertEquals(Message.FellBackToMp3(StreamFormat.MP3), state(AirState.OffAir, fellBack = true).fallbackNote)
-        assertNull(state(AirState.OffAir).fallbackNote)
     }
 
     @Test
@@ -149,5 +133,18 @@ class NowPlayingUiStateTest {
         val ui = state(AirState.OnAir(NowPlayingTrack(title = "Windowlicker", artist = "Aphex Twin", startedAt = 1)))
 
         assertEquals(Message.Text("Windowlicker"), ui.title)
+    }
+
+    @Test
+    fun `rests only while a record is coming out of the phone`() {
+        val record = NowPlayingTrack(title = "Carriageway", artist = "Pale Arcs", startedAt = 1)
+
+        assertTrue(state(AirState.OnAir(record), playing = true).canRest)
+        // Stopped, still warming up, or reading something that is no longer true: the words are the news.
+        assertFalse(state(AirState.OnAir(record)).canRest)
+        assertFalse(state(AirState.OnAir(record), playing = true, buffering = true).canRest)
+        assertFalse(state(AirState.OnAir(record), playing = true, stale = true).canRest)
+        assertFalse(state(AirState.WarmingUp, playing = true).canRest)
+        assertFalse(state(AirState.OffAir, playing = true).canRest)
     }
 }

@@ -51,7 +51,6 @@ fun Message.resolve(): String =
                 if (count == 0L) stringResource(R.string.nobody_listening) else pluralStringResource(R.plurals.listening, count.toInt(), count)
             stringResource(R.string.now_footer, people, format.label)
         }
-        is Message.FellBackToMp3 -> stringResource(R.string.now_fell_back_to_mp3, wanted.label)
         is Message.OnTheMic -> if (host == null) stringResource(R.string.now_on_the_mic_unnamed) else stringResource(R.string.now_on_the_mic, host)
         is Message.ShowWithHost -> stringResource(R.string.now_show_with_host, show, host)
         is Message.WithHost -> stringResource(R.string.now_with_host, host)
@@ -136,6 +135,17 @@ fun Message.resolve(): String =
         Message.ScheduleTakesThisBack -> stringResource(R.string.hold_offered)
         Message.HeldUntilReleased -> stringResource(R.string.hold_until_released)
         is Message.HeldUntilAbout -> stringResource(R.string.hold_until_about, clock.resolve())
+        Message.DeskOnAir -> stringResource(R.string.desk_on_air)
+        Message.DeskOffAir -> stringResource(R.string.desk_off_air)
+        is Message.GoingOut ->
+            when {
+                // Nobody is its own sentence, as it is under the play button: "going out to 0" reads like a fault.
+                listeners == 0L && name == null -> stringResource(R.string.desk_going_out_unnamed_to_nobody)
+                listeners == 0L -> stringResource(R.string.desk_going_out_to_nobody, name!!)
+                name == null -> pluralStringResource(R.plurals.desk_going_out_unnamed, listeners.toInt(), listeners.toInt())
+                else -> pluralStringResource(R.plurals.desk_going_out, listeners.toInt(), name, listeners.toInt())
+            }
+        is Message.TimeLeft -> stringResource(R.string.desk_time_left, artists, left)
         is Message.OperatorNotice ->
             when (val it = notice) {
                 Notice.NoLongerOperator -> stringResource(R.string.notice_no_longer_operator)

@@ -9,7 +9,6 @@
     <!-- The frame -->
     <string name="tab_now_playing">Now playing</string>
     <string name="tab_up_next">Up next</string>
-    <string name="tab_history">Played</string>
     <string name="tab_whats_on">What\'s on</string>
     <string name="settings">Settings</string>
     <string name="back">Back</string>
@@ -35,7 +34,6 @@
     </plurals>
     <!-- Who is listening, then how: "3 listening · MP3" -->
     <string name="now_footer">%1$s · %2$s</string>
-    <string name="now_fell_back_to_mp3">This station does not publish %1$s. Playing MP3.</string>
     <!-- The title while the station talks between records, naming the host: "Cass is on the mic" -->
     <string name="now_on_the_mic">%1$s is on the mic</string>
     <!-- The same, when the station named nobody -->
@@ -46,6 +44,7 @@
     <string name="now_with_host">with %1$s</string>
     <!-- The sleep timer: its button, its choices, and the line that counts down under the button -->
     <string name="sleep_timer">Sleep timer</string>
+    <string name="sleep_timer_detail">Stops listening on this phone after a while.</string>
     <plurals name="sleep_minutes">
         <item quantity="one">%1$d minute</item>
         <item quantity="other">%1$d minutes</item>
@@ -59,6 +58,7 @@
     <string name="playhead_position">%1$s of %2$s</string>
     <string name="play">Play</string>
     <string name="stop">Stop</string>
+    <string name="stop_listening">Stop listening</string>
     <string name="buffering">Buffering</string>
 
     <!-- First run and the station address -->
@@ -106,6 +106,9 @@
     <string name="show_password">Show password</string>
     <string name="hide_password">Hide password</string>
     <string name="sign_in">Sign in</string>
+    <!-- The sign-in page's heading: "Sign in to Deadair FM" -->
+    <string name="sign_in_to">Sign in to %1$s</string>
+    <string name="sign_in_detail">Listening needs no account. Signing in adds what the station has played and what is on next, and the station\'s controls if you run it.</string>
     <string name="sign_out">Sign out</string>
     <string name="sign_out_question">Sign out?</string>
     <string name="sign_out_detail">What the station has played and what is on next go back behind the sign-in. Listening is not affected.</string>
@@ -168,13 +171,16 @@
     <!-- The operator's transport. Drawn only for the account the station calls its operator -->
     <string name="skip">Skip</string>
     <string name="start">Start</string>
-    <string name="confirm_stop">Confirm stop</string>
+    <!-- The station's stop, named by what it stops: the round button on Now playing stops this phone -->
+    <string name="take_off_air">Take off air</string>
+    <string name="confirm_take_off_air">Press again to go off air</string>
     <string name="driving_schedule">The schedule put this on. It runs until the block ends.</string>
     <string name="driving_sustaining">Between blocks: nothing is scheduled, so the station is playing what it fills the gaps with.</string>
     <string name="driving_operator">You put this on. It holds until the next scheduled block begins.</string>
     <string name="hold_offered">The schedule takes this back at the next block.</string>
     <string name="hold_until_released">Held until you release it. The schedule will not take this back.</string>
     <string name="hold_until_about">Held until about %1$s.</string>
+    <string name="hold_heading">Hold</string>
     <string name="keep_on_past_next_block">Keep it on past the next block</string>
     <string name="keep_on_two_hours">Keep it on for two hours</string>
     <string name="release">Release</string>
@@ -190,6 +196,24 @@
     <string name="notice_record_refused">The station will not play that record now.</string>
     <string name="notice_could_not_reach">Could not reach the station to do that.</string>
     <string name="notice_failed">The station refused that (%1$d).</string>
+
+    <!-- The desk: the operator's page for everything that can take the station off air -->
+    <string name="desk">The desk</string>
+    <string name="desk_on_air">On air</string>
+    <string name="desk_off_air">Off air</string>
+    <!-- Under On air: the broadcast's name and how many are listening. "Afternoon Drift, going out to 9" -->
+    <plurals name="desk_going_out">
+        <item quantity="one">%1$s, going out to %2$d</item>
+        <item quantity="other">%1$s, going out to %2$d</item>
+    </plurals>
+    <plurals name="desk_going_out_unnamed">
+        <item quantity="one">Going out to %1$d</item>
+        <item quantity="other">Going out to %1$d</item>
+    </plurals>
+    <string name="desk_going_out_to_nobody">%1$s, and nobody is listening</string>
+    <string name="desk_going_out_unnamed_to_nobody">Going out, and nobody is listening</string>
+    <!-- The record on air: "Pale Arcs · 2:33 left" -->
+    <string name="desk_time_left">%1$s · %2$s left</string>
 
     <!-- The running order -->
     <string name="order_empty">The running order is empty.</string>
@@ -228,8 +252,12 @@
     <string name="host_on_air">%1$s (on air)</string>
 
     <!-- The operator's running-order actions -->
-    <string name="extend">Extend</string>
-    <string name="shuffle">Shuffle</string>
+    <!-- The Up next overflow: the operator's verbs, each saying what it does -->
+    <string name="more_actions">More actions</string>
+    <string name="menu_air_something">Air something…</string>
+    <string name="menu_add_a_record">Add a record…</string>
+    <string name="menu_refill">Ask the station to refill</string>
+    <string name="menu_shuffle">Shuffle what has not aired</string>
     <string name="refill_asked">Refill asked for. The records land in a few seconds.</string>
     <string name="row_actions">Actions for %1$s</string>
     <string name="play_next">Play next</string>
@@ -289,8 +317,8 @@
     <string name="album_no_tracks">No tracks from this album are in the catalog.</string>
     <string name="artist_no_albums">Nothing by this artist has been ingested as an album. Their tracks may still be in the catalog, filed without a release.</string>
     <plurals name="more_not_shown">
-        <item quantity="one">%1$d more, not shown here</item>
-        <item quantity="other">%1$d more, not shown here</item>
+        <item quantity="one">%1$d more not shown</item>
+        <item quantity="other">%1$d more not shown</item>
     </plurals>
     <string name="about_this_album">About this album</string>
     <string name="about_this_artist">About this artist</string>
@@ -323,7 +351,7 @@
     <string name="air_this_playlist">Air this playlist</string>
     <string name="chart_unavailable">This chart is unavailable.</string>
     <string name="chart_empty">Nothing in this edition.</string>
-    <string name="chart_order_heading">Which way round</string>
+    <string name="chart_order_heading">Which way round?</string>
     <string name="chart_order_countdown">Countdown, ending on number one</string>
     <string name="chart_order_ranked">Number one first</string>
     <string name="chart_order_unordered">No fixed order</string>
@@ -414,6 +442,9 @@
     <string name="rating_caption">This is the station\'s mark, not a favourite: it changes how often the station plays this.</string>
 
     <!-- History -->
+    <string name="history">History</string>
+    <!-- On Up next, where the folded history would be: everything the station has played, not only this broadcast -->
+    <string name="history_link">Everything the station has played</string>
     <string name="history_empty">Nothing has aired yet.</string>
     <string name="earlier">Earlier</string>
     <string name="history_yesterday_at">Yesterday %1$s</string>

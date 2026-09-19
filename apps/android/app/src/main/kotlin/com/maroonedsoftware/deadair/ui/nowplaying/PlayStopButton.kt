@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -35,7 +36,9 @@ fun PlayStopButton(
     size: Dp = 72.dp,
     iconSize: Dp = 32.dp,
 ) {
-    val label = stringResource(if (playing) R.string.stop else R.string.play)
+    // Named by what it stops: this phone, not the station. The station's own stop is on the desk
+    // and is called Take off air; both were "Stop" to TalkBack.
+    val label = stringResource(if (playing) R.string.stop_listening else R.string.play)
     val bufferingLabel = stringResource(R.string.buffering)
     FilledIconButton(
         onClick = if (playing) onStop else onPlay,
@@ -48,7 +51,13 @@ fun PlayStopButton(
             },
     ) {
         if (buffering) {
-            CircularProgressIndicator(modifier = Modifier.size(iconSize * 7 / 8), strokeWidth = if (size > 48.dp) 3.dp else 2.dp)
+            // In the button's content colour, as the icon is: the indicator's own default is the
+            // primary colour, which is this button's fill, so the spinner was drawn and never seen.
+            CircularProgressIndicator(
+                modifier = Modifier.size(iconSize * 7 / 8),
+                strokeWidth = if (size > 48.dp) 3.dp else 2.dp,
+                color = LocalContentColor.current,
+            )
         } else {
             Icon(painterResource(if (playing) R.drawable.ic_stop else R.drawable.ic_play), contentDescription = null, modifier = Modifier.size(iconSize))
         }

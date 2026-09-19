@@ -35,9 +35,16 @@ sealed interface Destination : NavKey {
     @Serializable
     data object Home : Destination
 
-    /** Over the top of whichever tab was showing. A thing you go and do, then leave. */
+    /**
+     * Signing in, over whichever screen asked. Closed by the root once the station issues a
+     * session, so the screen that asked is where the listener lands.
+     */
     @Serializable
-    data object Settings : Destination
+    data object SignIn : Destination
+
+    /** Everything the station has played, newest first. Reached from Up next, where the folded history sits. */
+    @Serializable
+    data object History : Destination
 
     /** One record, reached from anywhere it is named. */
     @Serializable
@@ -48,6 +55,10 @@ sealed interface Destination : NavKey {
 
     @Serializable
     data class Artist(val id: String) : Destination
+
+    /** Everything that can take the station off air, and why it is or is not on. Operator only; reached from the Up next tab. */
+    @Serializable
+    data object Desk : Destination
 
     /** Everything that could be put on air. Operator only; reached from the Up next tab. */
     @Serializable
@@ -91,7 +102,9 @@ val NavConfiguration: SavedStateConfiguration =
             SerializersModule {
                 polymorphic(NavKey::class) {
                     subclass(Destination.Home::class)
-                    subclass(Destination.Settings::class)
+                    subclass(Destination.History::class)
+                    subclass(Destination.SignIn::class)
+                    subclass(Destination.Desk::class)
                     subclass(Destination.Track::class)
                     subclass(Destination.Album::class)
                     subclass(Destination.Artist::class)

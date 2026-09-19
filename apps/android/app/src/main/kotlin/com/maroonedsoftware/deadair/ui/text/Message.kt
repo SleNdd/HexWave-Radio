@@ -49,8 +49,6 @@ sealed interface Message {
     /** "N listening · MP3", with the count spelled the way the language counts. */
     data class Listeners(val count: Long, val format: StreamFormat) : Message
 
-    data class FellBackToMp3(val wanted: StreamFormat) : Message
-
     /**
      * The title while the station talks between records: "Cass is on the mic". `host` is the name
      * the station sent, and absent when it named nobody, which has its own sentence rather than a
@@ -147,6 +145,17 @@ sealed interface Message {
     data object HeldUntilReleased : Message
 
     data class HeldUntilAbout(val clock: Clock) : Message
+
+    /** The desk's heading, from the station's own verdict on whether anything can be heard. */
+    data object DeskOnAir : Message
+
+    data object DeskOffAir : Message
+
+    /** Under On air: what is going out, by the broadcast's name when it has one, and to how many. */
+    data class GoingOut(val name: String?, val listeners: Long) : Message
+
+    /** The record on air, with what is left of it. `left` is a playhead reading ("2:33"), not words. */
+    data class TimeLeft(val artists: String, val left: String) : Message
 
     /** What an action came back with, for a snackbar. */
     data class OperatorNotice(val notice: Notice) : Message
