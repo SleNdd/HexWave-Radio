@@ -55,6 +55,7 @@ import {
 import type { PersonaNotesForPrompt } from '#modules/personas/persona.note.js';
 import type { PersonaStoryForPrompt } from '#modules/personas/persona.story.js';
 import type { SpokenWeather } from '#modules/weather/weather.words.js';
+import type { AlmanacEntry } from '@deadair/plugin-sdk';
 import { inventedFigure } from './weather.figures.js';
 import type { BreakStory, BreakTrack, BreakWriteRequest } from './break.writer.js';
 import { contradictsDayPart, namesWrongSky, namesWrongTimeOfDay, type RoughTime } from './clock.words.js';
@@ -213,6 +214,26 @@ export interface BreakPromptShape {
      * permits the weather on a station with no weather plugin simply never sees one.
      */
     weather?: 'reported' | 'offered';
+    /**
+     * Whether the day's entries are rendered on this kind of break, and on which terms.
+     *
+     * {@link BreakPromptShape.weather}'s exact shape and its exact reason, one substrate over:
+     *
+     * - `read` — the entry IS the break. The model picks one of the lines it was shown and says it,
+     *   and the rules around it are the strictest here. The break about the date.
+     * - `offered` — the day is colour on a break about something else, and the presenter may ignore
+     *   it, which most breaks should. The ordinary talk break.
+     *
+     * **The licence is the difference; the evidence is not.** Both terms forbid adding what the
+     * model remembers about an entry, because that guard is about what the station KNOWS rather than
+     * about what this kind of break is for, and both are held to the years they were shown through
+     * {@link AnswerGuard.years}. What `offered` drops is the instruction to pick one at all: a link
+     * that happens to notice the date is worth more than one that reads an almanac out.
+     *
+     * **Whether there are entries here at all is the CALLER's decision**, exactly as for a reading:
+     * `AlmanacSource` decides which kinds get them and what it costs to ask.
+     */
+    almanac?: 'read' | 'offered';
     /**
      * Whether a persona's {@link PersonaSheet.latitude} is offered on this kind of break.
      *
@@ -374,6 +395,12 @@ export const TALK_BREAK_SHAPE: BreakPromptShape = {
     // at all is `WeatherSource`'s, behind `rotation.weatherInTalk`, which is off by default — so this
     // line changes nothing on a station that has not asked for it. See `BreakPromptShape.weather`.
     weather: 'offered',
+    // And the same terms for the date, on the same word again. What a presenter may do with it is
+    // smaller than what they may do with the sky — the freedom is whether to mention an anniversary
+    // at all and how to tie it to the record, since everything else about an entry is somebody
+    // else's sentence. Whether there are entries here at all is `AlmanacSource`'s, behind
+    // `rotation.dateInTalk`, which is off by default. See `BreakPromptShape.almanac`.
+    almanac: 'offered',
     // The link between two records is the one kind with room to give. See `allowsLatitude`.
     allowsLatitude: true,
     // The same three rules with the first one turned around, which is the only one of them that was
@@ -1048,6 +1075,38 @@ function userPrompt(request: BreakWriteRequest, settings: PromptSettings, shape:
         );
     }
 
+    // The date's substrate, rendered on the same terms as the two above and carrying the third
+    // version of the same rule. A bulletin must not add a detail to a story, a forecast must not add
+    // a NUMBER, and this must not add what it REMEMBERS — which is the hardest of the three to
+    // resist, because a model handed "Nuno Bettencourt, Portuguese guitarist" knows what band he was
+    // in, and that sentence is indistinguishable on air from the one the station was actually given.
+    if (request.almanac !== undefined && request.almanac.entries.length > 0 && shape.almanac !== undefined) {
+        parts.push(describeDay(request.almanac.day.date, request.almanac.entries));
+        parts.push(
+            shape.almanac === 'read'
+                ? 'Pick one of those and say it. Everything you say about it has to be in the line you picked: do not add what somebody is ' +
+                      'known for, which band they were in, what else happened that year, or how any of it was received — the station was not ' +
+                      'told any of that, and what you remember about it sounds exactly like what you were given. ' +
+                      'Say the year as it is written above. ' +
+                      'You may say it as a person would rather than reading it out flat, and you may work out how long ago it was, since that ' +
+                      'is arithmetic on the year you were given. ' +
+                      'Nothing about what it means, what it led to, or how things were back then.'
+                : // The offered wording, built like the weather's and for its reasons. The
+                  // optionality first and outright, because a LIST is the shape a model will simply
+                  // read out; then what the licence actually is, which is smaller than the weather's
+                  // — there the presenter may react to the sky, and here the only freedom is whether
+                  // to mention the date at all and how to tie it to the record. The evidence rule is
+                  // unchanged and unsoftened, because what a model may add to somebody else's
+                  // sentence is not a question about what kind of break this is.
+                  'You do not have to mention any of that, and most breaks are better without it. It is here in case the date gives you ' +
+                      'something the record wants — a link that notices an anniversary is worth more than one that reads a list out. ' +
+                      'If you do use one: say the year as it is written above, and say it in passing rather than announcing it. ' +
+                      'What you may not do is add to it. Nothing about what somebody is known for, which band they were in, what else ' +
+                      'happened that year or how any of it was received: the station was not told any of that, and what you remember about ' +
+                      'it sounds exactly like what you were given.',
+        );
+    }
+
     // What the show has played, for a kind that is presenting one. OFFERED, and the wording of that
     // is the whole of this block: the measured failure of handing a model material is that the model
     // gets through it. "Work at most one of them in" read as an instruction to work one in, which is
@@ -1315,6 +1374,25 @@ function describeStory(story: BreakStory): string {
  * own, converted before this file ever saw them, and a model told the unit three times starts saying
  * it out loud.
  */
+/**
+ * The day's entries, as lines a model chooses between.
+ *
+ * `describeStory`'s shape rather than `describeWeather`'s, because these are sentences somebody
+ * wrote rather than figures somebody measured — and with `describeStory`'s hardest-won lesson
+ * applied from the start: what is handed over is the entry and its year and NOTHING else. The
+ * subjects' descriptions are deliberately withheld even though the station holds them, because a
+ * model shown "Portuguese guitarist" beside a name treats the pair as a licence to say what else it
+ * knows about him. The entry already carries whatever the source thought worth saying.
+ *
+ * The date is stated at the top so the model can say which day it is talking about without working
+ * it out of anything, which is `describeWeather`'s reason for naming the place.
+ */
+function describeDay(date: string, entries: readonly AlmanacEntry[]): string {
+    const lines = entries.map(entry => `- ${entry.year === undefined ? 'Today' : entry.year}: ${entry.text}`);
+
+    return [`What happened on today's date (${date}), one line each. These were looked up; they are not yours to add to.`, ...lines].join('\n');
+}
+
 function describeWeather(weather: SpokenWeather): string {
     const degrees = weather.units === 'imperial' ? 'Fahrenheit' : 'Celsius';
     const speed = weather.units === 'imperial' ? 'miles per hour' : 'kilometres per hour';

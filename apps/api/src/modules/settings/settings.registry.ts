@@ -35,6 +35,9 @@ import {
 import { NEWS_FEEDS_KEY } from '#modules/news/news.settings.js';
 import { CLOCK_KEYS, NAMES_THE_TIME_DEFAULT } from '#modules/director/clock.words.js';
 import { DEFAULT_UNITS, WEATHER_KEYS } from '#modules/weather/weather.keys.js';
+import { ALMANAC_KEYS, DEFAULT_LEAN } from '#modules/almanac/almanac.keys.js';
+import { ALMANAC_BREAK_KEYS, ALMANAC_TEMPLATES } from '#modules/director/almanac.break.writer.js';
+import { ALMANAC_SOURCE_KEYS, DEFAULT_DATE_IN_TALK } from '#modules/director/almanac.source.js';
 import {
     BREAK_WORD_KEYS,
     DEFAULT_STORY_WORDS,
@@ -877,6 +880,46 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'One phrasing per line, in the same syntax as the news above, with {{weather.report}} for the reading itself and ' +
             '{{weather.place}} for where it is about. The reading is a whole sentence built from what the service measured, so every line has ' +
             "to carry {{weather.report}} outside its [[optional]] parts and after a full stop. Empty restores the station's own.",
+    },
+    {
+        group: 'rotation',
+        key: ALMANAC_SOURCE_KEYS.inTalk,
+        label: 'Let the presenter mention the date between records',
+        type: 'boolean',
+        default: DEFAULT_DATE_IN_TALK,
+        help:
+            "What happened on today's date is offered to the presenter on an ordinary link, to use or ignore — most breaks ignore it, and the " +
+            'ones that do not mention an anniversary in passing rather than reading a list out. It needs a plugin that can say what happened ' +
+            'on a date, and a model writing the breaks; the station\u2019s own phrasings underneath the model never mention it. Anything said ' +
+            'this way is spent, so a band on the format clock set to This day has one fewer entry to use. This is separate from the break ' +
+            'ABOUT the date, which a band asks for and which reads an entry out properly.',
+    },
+    {
+        group: 'rotation',
+        key: ALMANAC_BREAK_KEYS.templates,
+        label: 'How the station reads the date out',
+        type: 'text',
+        default: ALMANAC_TEMPLATES.join('\n'),
+        help:
+            'One phrasing per line, in the same syntax as the weather above, with {{almanac.report}} for the entry itself and {{almanac.date}} ' +
+            'for the day it is about. The entry is read as it was published and this decides only what is said around it, which is why every ' +
+            "line has to carry {{almanac.report}} outside its [[optional]] parts and after a full stop. Empty restores the station's own.",
+    },
+    {
+        group: 'rotation',
+        key: ALMANAC_KEYS.lean,
+        label: 'What the station picks out of the day',
+        type: 'select',
+        default: DEFAULT_LEAN,
+        options: [
+            { value: 'music', label: 'Music first, then anything' },
+            { value: 'musicOnly', label: 'Music only' },
+            { value: 'any', label: 'Whatever the day has' },
+        ],
+        help:
+            'What happened on this date, for the breaks that read it out. A day usually has a few musicians in it and a great deal else, so the ' +
+            'default puts the musicians first and keeps the rest behind them. Music only is the stricter reading and can leave the station with ' +
+            'nothing to say on a thin day, which is a slot passed over rather than a general anniversary read out.',
     },
     {
         group: 'rotation',

@@ -16,6 +16,9 @@ import { BulletinSource, CategoryWatch, ReadLog } from './bulletin.source.js';
 import { ModelWeatherBreakWriter } from './model.weather.break.writer.js';
 import { WeatherBreakWriter } from './weather.break.writer.js';
 import { WeatherSource } from './weather.source.js';
+import { AlmanacBreakWriter } from './almanac.break.writer.js';
+import { ModelAlmanacBreakWriter } from './model.almanac.break.writer.js';
+import { AlmanacSource, SaidLog } from './almanac.source.js';
 import { ModelWelcomeWriter } from './model.welcome.writer.js';
 import { TalkBreakWriter } from './talk.break.writer.js';
 import { WelcomeAnnouncer } from './welcome.announcer.js';
@@ -145,6 +148,8 @@ export const DirectorModule: ServerKitModule = {
         registry.register(NewsBreakWriter).useClass(NewsBreakWriter).asScoped();
         registry.register(ModelWeatherBreakWriter).useClass(ModelWeatherBreakWriter).asScoped();
         registry.register(WeatherBreakWriter).useClass(WeatherBreakWriter).asScoped();
+        registry.register(ModelAlmanacBreakWriter).useClass(ModelAlmanacBreakWriter).asScoped();
+        registry.register(AlmanacBreakWriter).useClass(AlmanacBreakWriter).asScoped();
         registry.register(ModelStoryBreakWriter).useClass(ModelStoryBreakWriter).asScoped();
         registry.register(StoryBreakWriter).useClass(StoryBreakWriter).asScoped();
         registry.register(WarmUpWriter).useClass(WarmUpWriter).asScoped();
@@ -168,6 +173,15 @@ export const DirectorModule: ServerKitModule = {
         // not repeat a story, and a weather break repeating a temperature that has not changed is
         // the station being right twice.
         registry.register(WeatherSource).useClass(WeatherSource).asScoped();
+        // What the station has already said about today's date. A SINGLETON for `ReadLog`'s reason
+        // and with a sharper need for it: two bands reading the same anniversary an hour apart are
+        // both correct, so nothing else in the tree could ever notice. Registered ahead of the
+        // scoped source and the writers, all three of which hold it.
+        registry.register(SaidLog).useClass(SaidLog).asSingleton();
+        // The third source, scoped with the `AlmanacService` it reads. It needs no watch beside it,
+        // unlike the bulletin: a day that has run out of entries is the station working correctly
+        // rather than a subject that matches nothing, and the source says so in the log.
+        registry.register(AlmanacSource).useClass(AlmanacSource).asScoped();
         registry
             .register(BreakWriterRegistry)
             .useFactory(
@@ -200,6 +214,14 @@ export const DirectorModule: ServerKitModule = {
                             // station was never given is refused outright.
                             container.get(ModelWeatherBreakWriter),
                             container.get(WeatherBreakWriter),
+                            // The seventh kind, ranked the same way, and the floor under it is the
+                            // strictest in this list: it frames a sentence somebody else published
+                            // and may not touch a word of it, so the claim and its evidence are the
+                            // same span. The model above earns its place by saying the anniversary
+                            // as a presenter would and is checked the weather's way for it — a year
+                            // the station was never given is refused outright.
+                            container.get(ModelAlmanacBreakWriter),
+                            container.get(AlmanacBreakWriter),
                             // The fifth kind, ranked the same way and inverted underneath: the
                             // floor here is not a pool of phrasings but the operator's own prose,
                             // because a story is already written down. So a station with no model

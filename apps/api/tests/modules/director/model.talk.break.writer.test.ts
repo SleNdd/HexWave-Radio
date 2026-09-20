@@ -16,6 +16,7 @@ import {
     ModelTalkBreakWriter,
 } from '../../../src/modules/director/model.talk.break.writer.js';
 import { TALK_BREAK_KIND } from '../../../src/modules/director/talk.break.writer.js';
+import { SaidLog } from '../../../src/modules/director/almanac.source.js';
 import { DEFAULT_MAX_WORDS } from '../../../src/modules/director/break.prompt.js';
 import { patienceFor, WAIT } from '../../../src/modules/director/break.writer.js';
 import type { SpokenWeather } from '../../../src/modules/weather/weather.words.js';
@@ -60,7 +61,11 @@ function build(options: Options = {}) {
     const config = { get: (key: string, fallback: unknown) => (key in values ? values[key] : fallback) } as unknown as AppConfig;
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
-    return { writer: new ModelTalkBreakWriter(llm, config, logger), converse, logger };
+    // The log a link spends an entry into. A real one rather than a double: it is a set and a date,
+    // and what the tests about the date care about is what ends up in it.
+    const said = new SaidLog();
+
+    return { writer: new ModelTalkBreakWriter(llm, said, config, logger), converse, logger, said };
 }
 
 describe('ModelTalkBreakWriter', () => {
@@ -579,5 +584,79 @@ describe('ModelTalkBreakWriter and a reading it was offered', () => {
         });
 
         expect(written?.script).toContain('Summer 68');
+    });
+});
+
+// The same dimension arriving through the other offer, and the same posture for the same reason: a
+// link that mentioned an anniversary has claimed the DAY, and a link that ignored the entries has
+// claimed nothing. What differs from the weather is how the question is answered — an entry is
+// identified by the year the script named, which `AnswerGuard.years` has already held it to, so
+// there is no vocabulary to match and nothing to lean toward.
+describe('ModelTalkBreakWriter and a date it was offered', () => {
+    const day = {
+        month: 9,
+        day: 20,
+        date: '09-20',
+        from: new Date('2026-09-20T00:00:00Z').getTime(),
+        until: new Date('2026-09-21T00:00:00Z').getTime(),
+    };
+
+    const entries = [
+        { kind: 'birth' as const, year: 1966, text: 'Nuno Bettencourt, Portuguese guitarist' },
+        { kind: 'event' as const, year: 2011, text: 'Something else happened.' },
+    ];
+
+    const almanac = { day, entries };
+
+    it('claims the day when the break actually mentioned one of the entries', async () => {
+        const { writer } = build({ answer: 'Nuno Bettencourt turns sixty today, born in 1966. Here is Pink Moon.' });
+
+        const written = await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac });
+
+        expect(written?.claimsTime).toEqual({ from: day.from, until: day.until });
+    });
+
+    it('claims nothing when the break ignored the offer, which is most of them', async () => {
+        // The direction that matters, exactly as it does for the reading: a day stamped on a break
+        // that never mentioned the date would have it reopened and eventually dropped.
+        const { writer } = build({ answer: 'That was Solid Air, and this one has been stuck in my head all week. Pink Moon.' });
+
+        const written = await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac });
+
+        expect(written?.claimsTime).toBeUndefined();
+    });
+
+    it('spends the entry it used, so the band at twenty past says something else', async () => {
+        const { writer, said } = build({ answer: 'Born on this day in 1966, Nuno Bettencourt. Here is Pink Moon.' });
+
+        await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac });
+
+        expect(said.has(entries[0]!)).toBe(true);
+        expect(said.has(entries[1]!)).toBe(false);
+    });
+
+    it('spends nothing when it ignored the offer', async () => {
+        const { writer, said } = build({ answer: 'That was Solid Air. Pink Moon next.' });
+
+        await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac });
+
+        expect(said.has(entries[0]!)).toBe(false);
+    });
+
+    it('declines a break that said a year the station was never given', async () => {
+        const { writer } = build({ answer: 'Nuno Bettencourt was born on this day in 1977. Pink Moon.' });
+
+        expect(await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac })).toBeUndefined();
+    });
+
+    it('keeps the clock inside the day when a break claimed both', async () => {
+        // A rough time is minutes wide and sits inside the day it was read in, so the intersection
+        // is the clock's whenever there is one.
+        const clock = { words: 'just after nine', validFrom: day.from + 1_000, validUntil: day.from + 600_000 };
+        const { writer } = build({ answer: 'Just after nine, and Nuno Bettencourt turns sixty today, born in 1966. Pink Moon.' });
+
+        const written = await writer.write({ kind: TALK_BREAK_KIND, previous, next, almanac, clock });
+
+        expect(written?.claimsTime).toEqual({ from: clock.validFrom, until: clock.validUntil });
     });
 });
