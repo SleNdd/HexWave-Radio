@@ -658,19 +658,12 @@ export function ConfigFieldsForm({
     // plugin nor the settings page is in a position to answer. Resolved here rather than at the two
     // call sites so neither grows its own copy, and nothing is fetched for a form that asks for none.
     //
-    // The reader is how one source answers a question about ANOTHER field: `llm.models` offers the
-    // models of whichever plugin `llm.pluginId` names, and that value lives in this form. Positional
-    // names are this form's own business, so the lookup is by KEY and the translation happens here.
-    //
-    // BELOW `useForm` and not above it, which is not a tidiness point: the reader closes over `form`
-    // and is called synchronously during this same render, so declared any earlier it reads a `const`
-    // in its temporal dead zone and the whole settings page renders as "this page did not load".
-    const declared = useDeclaredOptions(fields, key => {
-        const index = fields.findIndex(field => field.key === key);
-        if (index < 0) return undefined;
-        const value = form.getValues()[nameOf(index)];
-        return typeof value === 'string' ? value : undefined;
-    });
+    // It used to take a reader over this form's own values, so that `llm.models` could offer the
+    // models of whichever plugin `llm.pluginId` named — which worked only while that key was a
+    // field of the same form, and had to be declared below `useForm` or it read a `const` in its
+    // temporal dead zone and the page rendered as "this page did not load". The station answers
+    // which plugin it reaches now, through `/plugins/providers`, so neither is true any more.
+    const declared = useDeclaredOptions(fields);
 
     /**
      * Whether anything here is unsaved, which is NOT the same question as `form.isDirty()`.
@@ -1663,10 +1656,11 @@ function RowCell({ column, labelled, choices, disabled, cell, secret }: RowCellP
  * clock panel's are. Each is labelled with the row's own number, which is the only thing telling a
  * screen reader which of a dozen identical buttons this one is.
  */
-function RowControls({
+export function RowControls({
     index,
     last,
     disabled,
+    name,
     onRemove,
     onMove,
 }: {
@@ -1674,15 +1668,26 @@ function RowControls({
     /** The last row's index, so the bottom row's down arrow can be turned off. */
     last: number;
     disabled: boolean;
-    onRemove: (index: number) => void;
+    /**
+     * What this row IS, for the labels, when it is something an operator can name.
+     *
+     * A row of a `list` field is "row 3" because that is genuinely all it is. The Providers
+     * section reuses these controls over rows that are plugins, where "Move row 3 up" is a worse
+     * label than "Move Deezer up" for the one reader who needs it most.
+     */
+    name?: string;
+    /** Absent leaves the row un-removable, which is how a pre-filled list keeps its own entries. */
+    onRemove?: (index: number) => void;
     onMove: (index: number, by: -1 | 1) => void;
 }) {
+    const what = name ?? `row ${index + 1}`;
+
     return (
         <Group gap={2} wrap="nowrap" justify="flex-end">
             <ActionIcon
                 variant="subtle"
                 color="gray"
-                aria-label={`Move row ${index + 1} up`}
+                aria-label={`Move ${what} up`}
                 disabled={disabled || index === 0}
                 onClick={() => {
                     onMove(index, -1);
@@ -1693,7 +1698,7 @@ function RowControls({
             <ActionIcon
                 variant="subtle"
                 color="gray"
-                aria-label={`Move row ${index + 1} down`}
+                aria-label={`Move ${what} down`}
                 disabled={disabled || index === last}
                 onClick={() => {
                     onMove(index, 1);
@@ -1701,17 +1706,17 @@ function RowControls({
             >
                 <IconArrowDown size={16} />
             </ActionIcon>
-            <RemoveRow index={index} disabled={disabled} onRemove={onRemove} />
+            {onRemove !== undefined && <RemoveRow index={index} disabled={disabled} name={what} onRemove={onRemove} />}
         </Group>
     );
 }
 
-function RemoveRow({ index, disabled, onRemove }: { index: number; disabled: boolean; onRemove: (index: number) => void }) {
+function RemoveRow({ index, disabled, name, onRemove }: { index: number; disabled: boolean; name?: string; onRemove: (index: number) => void }) {
     return (
         <ActionIcon
             variant="subtle"
             color="red"
-            aria-label={`Remove row ${index + 1}`}
+            aria-label={`Remove ${name ?? `row ${index + 1}`}`}
             disabled={disabled}
             onClick={() => {
                 onRemove(index);

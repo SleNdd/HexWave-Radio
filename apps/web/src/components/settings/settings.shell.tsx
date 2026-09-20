@@ -29,6 +29,7 @@ export type SettingsSectionId =
     | 'analysis'
     | 'artwork'
     | 'storage'
+    | 'providers'
     | 'grants'
     | 'plugins';
 
@@ -150,19 +151,29 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     {
         id: 'llm',
         label: 'Words',
-        hint: 'Which plugin it asks for words',
+        hint: 'What it writes, and which model writes it',
         group: 'llm',
-        blurb: 'Which plugin the station asks for words. With none set up it still writes its own breaks, from what is either side of them in the running order.',
+        blurb: 'What the station writes for itself and which model writes each of them. WHICH plugin it asks is under Providers; with none set up it still writes its own breaks, from what is either side of them in the running order.',
     },
     {
         id: 'analysis',
         label: 'Measurement',
-        hint: 'Which plugin measures records',
+        hint: 'How much of the library it measures at once',
         group: 'analysis',
-        blurb: 'Which plugin measures records, so the station can trim the dead air off each one and know how long it may talk over an intro. With none set up every track still plays, unmeasured.',
+        blurb: 'How widely the station measures its records, so it can trim the dead air off each one and know how long it may talk over an intro. WHICH plugin measures them is under Providers; with none set up every track still plays, unmeasured.',
     },
     { id: 'artwork', label: 'Artwork', hint: "The pictures a listener's player shows" },
     { id: 'storage', label: 'Storage', hint: 'What the caches are holding' },
+    // Immediately before the two plugin sections, because it is the question they raise: having
+    // installed a second thing that can do a job, which one does it. Its settings live in the
+    // `providers` group, which no card above draws — the choice is always about the plugins in
+    // front of the operator, and a text field holding `deadair.kokoro` is not that.
+    {
+        id: 'providers',
+        label: 'Providers',
+        hint: 'Who does what, and who is asked first',
+        blurb: 'The jobs more than one of your plugins can do, and which of them the station uses. Nothing here switches a plugin on or off: that is the Plugins page, and this decides what the station does with the ones that are running.',
+    },
     { id: 'grants', label: 'Waiting on you', hint: 'What plugins have asked for' },
     { id: 'plugins', label: 'Plugins', hint: 'What the station runs, and what they have asked for', route: '/plugins' },
 ];
@@ -192,6 +203,7 @@ export const SETTINGS_ROUTES: Record<
     | '/settings/analysis'
     | '/settings/artwork'
     | '/settings/storage'
+    | '/settings/providers'
     | '/settings/grants'
     | '/plugins'
 > = {
@@ -208,6 +220,7 @@ export const SETTINGS_ROUTES: Record<
     analysis: '/settings/analysis',
     artwork: '/settings/artwork',
     storage: '/settings/storage',
+    providers: '/settings/providers',
     grants: '/settings/grants',
     plugins: '/plugins',
 };
