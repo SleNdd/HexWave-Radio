@@ -53,6 +53,12 @@ export interface ListenBrainzTag {
  */
 export interface ListenBrainzRecordingMetadata {
     recording?: {
+        /**
+         * The recording's title. Present whenever `inc` asked for nothing that
+         * suppresses it, and the reason the similarity capability can turn a
+         * radio answer's bare mbids into records a station can schedule.
+         */
+        name?: string;
         rels?: { artist_name?: string; artist_mbid?: string; type?: string; instrument?: string }[];
     };
     release?: {
@@ -80,3 +86,68 @@ export interface ListenBrainzRecordingMetadata {
 
 /** The metadata endpoint answers a map keyed by recording MBID, not an array. */
 export type ListenBrainzRecordingMetadataResponse = Record<string, ListenBrainzRecordingMetadata>;
+
+/**
+ * One row of the radio endpoint's answer: a recording by an artist who
+ * resembles the seed.
+ *
+ * The row carries the ARTIST's name and the recording's id, and never the
+ * recording's title — turning these into records therefore costs a second
+ * request to the metadata endpoint, which is why `similarArtists` (names only)
+ * is one request and naming records is two.
+ */
+export interface ListenBrainzRadioRecording {
+    recording_mbid?: string;
+    similar_artist_mbid?: string;
+    similar_artist_name?: string;
+    total_listen_count?: number;
+}
+
+/**
+ * `GET /1/lb-radio/artist/{mbid}`, keyed by similar-artist MBID.
+ *
+ * The seed artist is one of the keys: the endpoint builds a radio station about
+ * an artist, and such a station plays that artist. Every caller here drops
+ * them, because the host asked who ELSE sounds like this.
+ */
+export type ListenBrainzRadioResponse = Record<string, ListenBrainzRadioRecording[]>;
+
+/**
+ * One row of `GET /1/popularity/top-recordings-for-artist/{mbid}`, already
+ * ordered by listen count.
+ *
+ * Field names checked against `listenbrainz/webserver/views/popularity_api.py`
+ * rather than guessed. `artist_name` is deliberately NOT read: it is the
+ * artist CREDIT for the recording, so a featured spot would arrive as a joined
+ * line, and everything downstream matches a record on its lead artist alone.
+ * The lead comes from the metadata endpoint, as it does on the radio path.
+ */
+export interface ListenBrainzTopRecording {
+    recording_mbid?: string;
+    recording_name?: string;
+    artist_name?: string;
+    artist_mbids?: string[];
+    release_name?: string;
+    total_listen_count?: number;
+}
+
+/**
+ * One row of `GET labs.api.listenbrainz.org/similar-recordings/json`.
+ *
+ * `reference_mbid` echoes the recording that was asked about, which is how a
+ * row about the seed itself is told from a row about something else.
+ *
+ * `artist_credit_name` is a CREDIT and `artist_credit_mbids` came back null on
+ * every row measured, so neither can give the lead artist. It comes from the
+ * metadata endpoint instead.
+ */
+export interface ListenBrainzSimilarRecording {
+    recording_mbid?: string;
+    recording_name?: string;
+    artist_credit_name?: string;
+    artist_credit_mbids?: string[] | null;
+    release_name?: string;
+    reference_mbid?: string;
+    /** How alike, on this algorithm's own scale. Rows arrive highest first. */
+    score?: number;
+}

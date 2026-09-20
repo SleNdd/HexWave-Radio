@@ -2,7 +2,16 @@ import { type PluginManifest } from '@deadair/plugin-sdk';
 import { z } from 'zod';
 
 export const PLUGIN_ID = 'deadair.musicbrainz';
-export const PLUGIN_VERSION = '0.0.1';
+/**
+ * What an operator sees on the plugin's card, in the `plugin active` log line and
+ * in the outgoing user-agent. Hand-kept, and separate from `package.json`'s
+ * version, which is the station's own and moves with every release.
+ *
+ * `0.1.0` because this gained a whole capability: it answers `similarity` as
+ * well as `enrichment`, it is called MusicBrainz and ListenBrainz now, and it
+ * reaches a host it did not before.
+ */
+export const PLUGIN_VERSION = '0.1.0';
 
 /** The public web service. Also the default `baseUrl`, which an operator can point at a mirror. */
 export const DEFAULT_BASE_URL = 'https://musicbrainz.org/ws/2';
@@ -37,6 +46,18 @@ export const PUBLIC_RATE_PER_SECOND = 1;
  * other.
  */
 export const LISTENBRAINZ_ORIGIN = 'https://api.listenbrainz.org';
+
+/**
+ * The datasets ListenBrainz hosts beside its main API, which is where
+ * record-to-record similarity lives.
+ *
+ * A separate hostname and the same service, so it shares
+ * {@link LISTENBRAINZ_BUCKET}: a published limit covers a service rather than a
+ * name, and pacing the two independently would quietly buy twice the allowance.
+ */
+export const LISTENBRAINZ_LABS_ORIGIN = 'https://labs.api.listenbrainz.org';
+
+export const LISTENBRAINZ_LABS_HOST = 'labs.api.listenbrainz.org';
 
 /**
  * Its own bucket, deliberately. A published limit covers a service, and pacing
@@ -93,11 +114,12 @@ export type MusicBrainzConfig = z.infer<typeof configSchema>;
 
 export const musicbrainzManifest: PluginManifest = {
     id: PLUGIN_ID,
-    name: 'MusicBrainz',
+    name: 'MusicBrainz and ListenBrainz',
     version: PLUGIN_VERSION,
-    capabilities: ['enrichment'],
+    capabilities: ['enrichment', 'similarity'],
     apiVersion: '^1.0.0',
-    description: 'Canonical artist, release and recording identity from MusicBrainz, plus genres, label and artwork.',
+    description:
+        'Canonical artist, release and recording identity from MusicBrainz, plus genres, label and artwork; and from ListenBrainz, who sounds like whom.',
     homepage: 'https://musicbrainz.org/doc/MusicBrainz_API',
     permissions: {
         // The two public entries share a bucket and are listed first, so a
@@ -112,6 +134,7 @@ export const musicbrainzManifest: PluginManifest = {
             // public service is still matched by them first, and on its own
             // bucket, because its budget is nothing to do with theirs.
             { host: 'api.listenbrainz.org', ratePerSecond: LISTENBRAINZ_RATE_PER_SECOND, bucket: LISTENBRAINZ_BUCKET },
+            { host: LISTENBRAINZ_LABS_HOST, ratePerSecond: LISTENBRAINZ_RATE_PER_SECOND, bucket: LISTENBRAINZ_BUCKET },
             { fromConfig: 'baseUrl' },
         ],
         // No storage. Everything this plugin learns is stored by the host,
@@ -143,7 +166,7 @@ export const musicbrainzManifest: PluginManifest = {
             // reads it back. It is read through `host.secrets.get`, not
             // `host.config.get`, which is why it is absent from `configSchema`.
             type: 'secret',
-            help: 'Free, from your ListenBrainz profile settings. ListenBrainz publishes the same data as MusicBrainz over endpoints that answer about fifty tracks at once, so a token turns a catalog that would take days into one that takes minutes. Leave it blank to stay on the public MusicBrainz service.',
+            help: 'Free, from your ListenBrainz profile settings. ListenBrainz publishes the same data as MusicBrainz over endpoints that answer about fifty tracks at once, so a token turns a catalog that would take days into one that takes minutes. Leave it blank and the facts still arrive, one request a second — and who-sounds-like-whom works either way, because the endpoint behind it is open to anyone.',
         },
         {
             key: 'matchScore',
