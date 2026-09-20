@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
             // The phone's own clock preference, read once here so nothing below reaches for
             // `android.text.format` and everything that writes a time agrees.
             CompositionLocalProvider(LocalUses24HourClock provides DateFormat.is24HourFormat(this)) {
-                DeadairTheme(dynamicColour = settings?.dynamicColour ?: true) {
+                DeadairTheme(dynamicColor = settings?.dynamicColor ?: true) {
                     Listener(graph, links)
                 }
             }
@@ -234,7 +234,12 @@ private fun Listener(graph: AppGraph, links: MutableStateFlow<String?>) {
                                             },
                                         ),
                                     session = session,
-                                    dynamicColour = loaded.dynamicColour,
+                                    dynamicColor = loaded.dynamicColor,
+                                    wallpaperFollows = loaded.wallpaperFollows,
+                                    wallpaperIdle = loaded.wallpaperIdle,
+                                    wallpaperPlacement = loaded.wallpaperPlacement,
+                                    wallpaperColorSource = loaded.wallpaperColorSource,
+                                    wallpaperColor = loaded.wallpaperColor,
                                     playOnOpen = loaded.playOnOpen,
                                     onAddressChange = model::onAddressChange,
                                     onCheck = model::check,
@@ -245,7 +250,12 @@ private fun Listener(graph: AppGraph, links: MutableStateFlow<String?>) {
                                         tab = Tab.NOW_PLAYING
                                     },
                                     onFormat = model::setFormat,
-                                    onDynamicColour = model::setDynamicColour,
+                                    onDynamicColor = model::setDynamicColor,
+                                    onWallpaperFollows = model::setWallpaperFollows,
+                                    onWallpaperIdle = model::setWallpaperIdle,
+                                    onWallpaperPlacement = model::setWallpaperPlacement,
+                                    onColorSource = model::setColorSource,
+                                    onWallpaperColor = model::setWallpaperColor,
                                     onPlayOnOpen = model::setPlayOnOpen,
                                     onOpenSignIn = openSignIn,
                                     onSignOut = model::signOut,

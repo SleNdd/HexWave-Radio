@@ -42,6 +42,33 @@
     <string name="now_show_with_host">%1$s · with %2$s</string>
     <!-- The same line for a show with no name: "with Cass" -->
     <string name="now_with_host">with %1$s</string>
+    <!-- The station as a live wallpaper, chosen from the system's wallpaper picker -->
+    <!-- What the phone's wallpaper picker lists this under, among everybody else's live wallpapers -->
+    <string name="wallpaper_label">deadair station wallpaper</string>
+    <!-- The same thing as a heading inside the app, where the station's name is already above it -->
+    <string name="wallpaper_section">Station wallpaper</string>
+    <string name="wallpaper_description">The cover of whatever the station is playing.</string>
+    <string name="wallpaper_set">Set as wallpaper</string>
+    <string name="wallpaper_shows">Show the cover</string>
+    <string name="wallpaper_this_phone">While this phone is playing</string>
+    <string name="wallpaper_this_phone_detail">The station is asked nothing while you are not listening.</string>
+    <string name="wallpaper_station">Whenever the station is on air</string>
+    <string name="wallpaper_station_detail">The home screen asks the station what is on while it is showing.</string>
+    <string name="wallpaper_otherwise">With nothing to show</string>
+    <string name="wallpaper_placement">Put the cover</string>
+    <string name="wallpaper_placement_top">At the top</string>
+    <string name="wallpaper_placement_middle">In the middle</string>
+    <string name="wallpaper_placement_bottom">At the bottom</string>
+    <string name="wallpaper_colors">Color the phone from</string>
+    <string name="wallpaper_colors_station">The station\'s own colors</string>
+    <string name="wallpaper_colors_artwork">The cover on screen</string>
+    <string name="wallpaper_colors_artwork_detail">Your phone re-colors itself every time the station changes record.</string>
+    <string name="wallpaper_colors_custom">A color you pick</string>
+    <string name="wallpaper_color_chosen">Chosen</string>
+    <string name="wallpaper_last_cover">Keep the last cover, dimmed</string>
+    <string name="wallpaper_mark">The station\'s mark</string>
+    <string name="wallpaper_plain">Nothing at all</string>
+
     <!-- The sleep timer: its button, its choices, and the line that counts down under the button -->
     <string name="sleep_timer">Sleep timer</string>
     <string name="sleep_timer_detail">Stops listening on this phone after a while.</string>
@@ -95,8 +122,8 @@
     <string name="section_listening">Listening</string>
     <string name="play_on_open">Play when the app opens</string>
     <string name="play_on_open_detail">Starts the station as the app opens, unless it is already playing. The first seconds are quiet while the station comes on air.</string>
-    <string name="use_wallpaper_colours">Use wallpaper colours</string>
-    <string name="use_wallpaper_colours_detail">Off, and the app wears the station\'s own green on carbon</string>
+    <string name="use_wallpaper_colors">Use wallpaper colors</string>
+    <string name="use_wallpaper_colors_detail">Off, and the app wears the station\'s own green on carbon</string>
     <string name="privacy_policy">Privacy policy</string>
 
     <!-- The account -->

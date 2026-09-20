@@ -8,6 +8,11 @@ import com.maroonedsoftware.deadair.sdk.models.PlatformRole
 import com.maroonedsoftware.deadair.station.StationCheck
 import com.maroonedsoftware.deadair.station.StreamFormat
 import com.maroonedsoftware.deadair.ui.setup.SetupScreen
+import com.maroonedsoftware.deadair.wallpaper.STATION_PALETTE
+import com.maroonedsoftware.deadair.wallpaper.ColorSource
+import com.maroonedsoftware.deadair.wallpaper.CoverPlacement
+import com.maroonedsoftware.deadair.wallpaper.WallpaperFollows
+import com.maroonedsoftware.deadair.wallpaper.WallpaperIdle
 import com.maroonedsoftware.deadair.ui.text.Message
 import com.maroonedsoftware.deadair.ui.theme.DeadairTheme
 
@@ -22,13 +27,23 @@ private fun Settings(entry: StationEntryState, session: SessionState) {
                 format = StreamFormat.MP3,
                 availability = availability,
                 session = session,
-                dynamicColour = false,
+                dynamicColor = false,
+                wallpaperFollows = WallpaperFollows.THIS_PHONE,
+                wallpaperIdle = WallpaperIdle.LAST_COVER,
+                wallpaperPlacement = CoverPlacement.MIDDLE,
+                wallpaperColorSource = ColorSource.CUSTOM,
+                wallpaperColor = STATION_PALETTE.accent,
                 playOnOpen = false,
                 onAddressChange = {},
                 onCheck = {},
                 onConfirm = {},
                 onFormat = {},
-                onDynamicColour = {},
+                onDynamicColor = {},
+                onWallpaperFollows = {},
+                onWallpaperIdle = {},
+                onWallpaperPlacement = {},
+                onColorSource = {},
+                onWallpaperColor = {},
                 onPlayOnOpen = {},
                 onOpenSignIn = {},
                 onSignOut = {},
