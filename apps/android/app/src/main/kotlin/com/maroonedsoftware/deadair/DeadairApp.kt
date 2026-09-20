@@ -2,9 +2,11 @@ package com.maroonedsoftware.deadair
 
 import android.app.Application
 import android.os.SystemClock
+import androidx.glance.appwidget.updateAll
 import coil3.SingletonImageLoader
 import com.maroonedsoftware.deadair.auth.OperatorActions
 import com.maroonedsoftware.deadair.auth.SessionManager
+import com.maroonedsoftware.deadair.auth.SessionState
 import com.maroonedsoftware.deadair.auth.SessionStore
 import com.maroonedsoftware.deadair.catalog.CatalogActions
 import com.maroonedsoftware.deadair.director.OrderActions
@@ -20,9 +22,15 @@ import com.maroonedsoftware.deadair.schedule.ScheduleRepository
 import com.maroonedsoftware.deadair.scripts.ScriptActions
 import com.maroonedsoftware.deadair.settings.SettingsStore
 import com.maroonedsoftware.deadair.station.StationProbe
+import com.maroonedsoftware.deadair.widget.StationWidget
+import com.maroonedsoftware.deadair.widget.coverBitmap
+import com.maroonedsoftware.deadair.widget.WidgetFeed
+import com.maroonedsoftware.deadair.widget.WidgetRefreshWorker
+import com.maroonedsoftware.deadair.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
 
 /**
  * The application object, and the few long-lived objects that hang off it.
@@ -38,6 +46,7 @@ class DeadairApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        graph.widget.start()
         // Artwork goes over the same OkHttp client as everything else, so the station sees one
         // User-Agent from this phone and counts one listener rather than two.
         SingletonImageLoader.setSafe(imageLoaderFactory(this))
@@ -45,7 +54,7 @@ class DeadairApp : Application() {
 }
 
 /** What everything else resolves out of. */
-class AppGraph(application: Application) {
+class AppGraph(private val application: Application) {
     /**
      * Where the poll lives. Process-lifetime, because both the screen and the playback service
      * collect the same readings and neither should own the other's.
@@ -135,6 +144,32 @@ class AppGraph(application: Application) {
             // between two readings, and a device whose clock is corrected between them would
             // otherwise jump or run backwards.
             elapsedMs = SystemClock::elapsedRealtime,
+            scope = scope,
+        )
+
+    /**
+     * What keeps the home-screen widget's snapshot current.
+     *
+     * Started by [DeadairApp.onCreate] rather than constructed lazily, because its whole job is to
+     * be listening when something else happens to hear from the station. It takes the poll's
+     * passive tap and never `state`, so it cannot be the reason a poll is running.
+     */
+    val widget: WidgetFeed =
+        WidgetFeed(
+            store = WidgetSnapshotStore(application),
+            schedule = { WidgetRefreshWorker.enqueue(application) },
+            unschedule = { WidgetRefreshWorker.cancel(application) },
+            settings = settings.settings,
+            heard = nowPlaying.heard,
+            // The cached role, off disk. A hint for what to DRAW; every press is still the API's
+            // to refuse, and a 403 re-reads the roles, which takes the button away again.
+            operator = sessions.state.map { it is SessionState.SignedIn && it.isOperator },
+            skip = transport::skip,
+            // Wall-clock, unlike the playhead's `elapsedRealtime`: this one is shown to a person as
+            // a time of day and has to survive the phone being turned off and on again.
+            now = System::currentTimeMillis,
+            redraw = { StationWidget().updateAll(application) },
+            loadCover = { url -> coverBitmap(application, url) },
             scope = scope,
         )
 }
