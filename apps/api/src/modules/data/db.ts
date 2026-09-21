@@ -804,7 +804,7 @@ export interface DeadairStationEvents {
   detail: string;
   id: Generated<string>;
   kind: string;
-  module: "playout" | "director" | "render" | "catalog" | "plugins";
+  module: "playout" | "director" | "render" | "catalog" | "plugins" | "storage";
   severity: Generated<"info" | "warn" | "fault">;
   stationKey: Generated<string>;
 }

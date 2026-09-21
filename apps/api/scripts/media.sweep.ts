@@ -16,6 +16,13 @@
  * here — it is what will happen regardless, because nothing can tell that these bytes are the ones
  * being asked for.
  *
+ * **The station does this on a schedule now.** `SweepOrphansJob` runs nightly against all three
+ * stores, and `storage.sweepOrphans` turns it on. It differs from this script in the one way that
+ * matters: it will not take a file that has sat unclaimed for less than the grace period, which is
+ * what makes both orderings below stop being a person's problem. Reach for this script for a
+ * one-off, for a single store, to see what would go without turning anything on, or for a volume
+ * this process is not the one mounting.
+ *
  * Two orderings matter and neither is enforced here:
  *
  *  - For `segments`, scan the inbox FIRST (`POST /segments/scan`, or a boot). The store is content
@@ -36,7 +43,7 @@ import { AppConfigBuilder, AppConfigResolverEnv, AppConfigSourceDotenv } from '@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { KyselyDefaultPlugins, KyselyPgTypeOverrides, KyselyPool } from '@maroonedsoftware/kysely';
 
-import type { ContentStore } from '../src/modules/shared/content.store.js';
+import type { ContentStore, StoredFile } from '../src/modules/shared/content.store.js';
 import type { DB } from '../src/modules/data/db.js';
 import { ArtStore } from '../src/modules/art/art.store.js';
 import { SegmentStore } from '../src/modules/render/segment.store.js';
@@ -109,7 +116,11 @@ try {
     // Anything the store cannot name is left alone rather than swept: a `.tmp-` file an interrupted
     // write left behind, something a person dropped in, and — for `segments` — everything in the
     // inbox, which sits under this root and is not the store's to remove.
-    const named = files.filter((file): file is { checksum: string; ext: string; bytes: number } => 'checksum' in file);
+    // Intersected with StoredFile rather than respelling its fields, which is what this was: a
+    // literal listing checksum, ext and bytes stopped narrowing the moment the store learned to
+    // report a file's age, and the failure surfaced two lines down as a checksum that might be
+    // undefined rather than here.
+    const named = files.filter((file): file is StoredFile & { checksum: string; ext: string } => 'checksum' in file);
     const orphans = named.filter(file => !claimed.has(file.checksum));
     const bytes = orphans.reduce((total, file) => total + file.bytes, 0);
 
