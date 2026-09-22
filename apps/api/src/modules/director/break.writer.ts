@@ -330,10 +330,14 @@ export interface BreakWriteRequest {
      * ENGINE, and a pad is a property of this CHARACTER — `personas.soundboard` names a board, and
      * the board holds what an operator dropped in a directory.
      *
-     * Unread by every deterministic writer, exactly as reactions are, and the same sentence explains
-     * it: a template is a phrasing an operator typed, and a station that hits an air horn on a
-     * schedule is a station with a fault rather than a house style. What gives the floor a pad is the
-     * spacing rule, which is a decision about the BREAK rather than about the words.
+     * Unread by every deterministic writer but one, exactly as reactions are, and the same sentence
+     * explains it: a template is a phrasing an operator typed, and a station that hits an air horn on
+     * a schedule is a station with a fault rather than a house style. What gives the floor a pad is
+     * the spacing rule, which is a decision about the BREAK rather than about the words.
+     *
+     * The exception is `JingleWriter`, which ends every jingle on the first of these. That sentence
+     * is about a presenter talking, and imaging is the one place a station makes the same noise on
+     * purpose.
      */
     pads?: readonly string[];
     /**
@@ -714,6 +718,16 @@ export abstract class BreakWriter {
      * assumed" is the answer that goes quietly wrong the day a model stops answering.
      */
     abstract readonly name: string;
+
+    /**
+     * Whether a RECORDING of this kind should be drawn in preference to anything written.
+     *
+     * Absent for almost every writer, which is the planner's ordinary order: write the break, and
+     * reach for the shelf only when nothing can. That order is right for a talk break, whose shelf is
+     * every break the station ever rendered, and wrong for a kind an operator records on purpose,
+     * where writing one anyway would silence every file they dropped in. `JingleWriter` is that kind.
+     */
+    readonly yieldsToRecordings?: boolean;
 
     /**
      * Write one break, or answer `undefined` when there is nothing worth saying.

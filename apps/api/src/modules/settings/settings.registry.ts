@@ -27,6 +27,7 @@ import {
     THREAD_GAP_KEY,
 } from '#modules/personas/persona.thread.settings.js';
 import { WELCOME_KEYS, WELCOME_TEMPLATES } from '#modules/director/welcome.writer.js';
+import { JINGLE_KEYS, JINGLE_TEMPLATES } from '#modules/director/jingle.writer.js';
 import { NEWS_KEYS, NEWS_TEMPLATES } from '#modules/director/news.break.writer.js';
 import { WEATHER_BREAK_KEYS, WEATHER_TEMPLATES } from '#modules/director/weather.break.writer.js';
 import {
@@ -733,6 +734,21 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     },
     {
         group: 'rotation',
+        key: ROTATION_KEYS.jingleEveryMinutes,
+        label: 'Minutes between jingles',
+        type: 'number',
+        default: DEFAULT_RULES.jingleEveryMinutes,
+        dependsOn: ROTATION_KEYS.breaks,
+        min: 0,
+        max: 720,
+        help:
+            'A few seconds of the station saying its own name between two records, this often. Zero is off. A jingle never lands beside a ' +
+            'break and a break always wins the boundary. Recordings dropped in the jingle folder, or uploaded as the jingle kind, are played ' +
+            'first; with none, the station says one of its own lines below, ending on a hit from the soundboard if the presenter has one. ' +
+            'Ten or so sounds like a commercial station; thirty is a nudge.',
+    },
+    {
+        group: 'rotation',
         key: BREAK_WORD_KEYS.talk,
         label: 'Words a talk break may run to',
         type: 'number',
@@ -800,6 +816,18 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'One phrasing per line, in the same syntax as the breaks above, with {{greeting}} for "good morning" and the like. ' +
             'A greeting is deliberately not a back-announce: somebody who has just arrived did not hear the last record, so ' +
             "{{previous.*}} is not offered here. Empty restores the station's own.",
+    },
+    {
+        group: 'rotation',
+        key: JINGLE_KEYS.templates,
+        label: 'What the station says in a jingle',
+        type: 'text',
+        default: JINGLE_TEMPLATES.join('\n'),
+        dependsOn: ROTATION_KEYS.breaks,
+        help:
+            'One phrasing per line, in the same syntax as the breaks above, said between two records when the station has no jingle recorded. ' +
+            'Keep them short: a jingle that runs past a few seconds is a talk break. Only {{station.name}} and {{dj.name}} are offered, because a ' +
+            "jingle is placed well ahead and must not name a record or the time of day. Empty restores the station's own.",
     },
     {
         group: 'rotation',

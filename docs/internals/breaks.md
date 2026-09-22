@@ -43,6 +43,21 @@ the operator's: a placeholder outside an optional chunk that cannot be filled me
 not apply, and a phrasing saying nothing about the record just finished is only offered where there
 is none.
 
+**A jingle is a kind with a floor and nothing above it.** `JingleWriter` writes `jingle` out of
+`rotation.jingleTemplates` and is the third deterministic writer with no model in front of it, after
+`WarmUpWriter` and the story floor's operator prose. A jingle is a fixed line a listener is meant to
+recognise, so a model would add variety to the one thing that should not vary, and would spend the model
+slot every few records on a sentence the station already knows. Three things differ from the talk-break
+floor. It fills `{{station.name}}` and `{{dj.name}}` and nothing else, whatever the request carries: a
+jingle is planted by a spacing rule an hour ahead and checked against no claim at hand-over, so naming a
+record or saying good morning would be a promise nothing polices. It reads `BreakWriteRequest.pads`, which
+every other deterministic writer leaves alone, and ends every jingle on the first pad offered (the least
+recently hit), because the argument against an air horn on a schedule is about a presenter talking and
+imaging is the one place a station makes the same noise on purpose. That hit is a written row with pads, so
+it resets `breaksSincePad` like any other and the talk-break floor reaches for the rack less often while
+jingles are on. That is deliberate: the station has one budget for noise, not one per kind. And its
+repetition window is the pool minus one, `WarmUpWriter`'s choice, since one listener hears several an hour.
+
 **A phrasing the station just used is recognised by its OPENING, or failing that by its refrain.**
 `recent` is a list of scripts and carries no template identity, so `wasHeard` has to recognise a
 phrasing from words that name records the station has since played past. The opening literal does it
@@ -74,6 +89,16 @@ gives its segment no position on purpose and `DirectorService.injectReady` finds
 `WriteBreakJob` therefore asks whether a request is behind the segment before it defers, and `injectReady`
 carries the re-offer that `ripen` cannot, since `ripen` walks the order and this break is deliberately outside
 it.
+
+**A jingle the listener is about to hear IS their welcome.** A rendered welcome lands in front of the first
+record at or after the head, so anything before that record is what a new listener hears first. When a
+jingle is in that stretch (still to come, with the player, or airing), `DirectorService.takeRequest` declines
+the welcome before writing anything down (`BreakPlanner.greetedByJingle`), because the station saying its own
+name twice in a row is worse than once. Nothing is removed: the decline is not an acceptance, so it spends no
+cooldown and the next arrival is judged afresh. A cut or skipped jingle greets nobody, and an ident does not
+count, which leaves the welcome exactly as it was on a station with jingles off. Merging the two kinds was
+considered and refused: the writer registry is keyed by kind, so `ModelWelcomeWriter` would have written
+every spaced jingle.
 
 ## A claim needs its evidence
 
@@ -559,6 +584,16 @@ already precedence, `enabled` is what commenting a line out did, and a check con
 spacing shapes exclusive), edited on the schedule page because a slot and a band are one question with two
 answers. `clock.bands.ts` keeps only what was always the hard half: `nextOccurrence` and the daylight-saving
 care under it.
+
+**A jingle has a band AND a floor, the way a talk break does.** An interval band of kind `jingle` is the
+precise tool (one rate in the morning, another at night), and `rotation.jingleEveryMinutes` is the one number
+for everybody else, as `rotation.breakEveryMinutes` is to a `talkbreak` band. The floor is the LAST walk in
+`BreakPlanner.slotsFor`, after the station's talk-break spacing, so a break always has first pick of a
+boundary and `blockedBy(taken)` keeps a jingle off it and off the boundary either side. Its slot carries
+`jingle` as if a band had named it, so `fillBand` fills it: a recording first (`yieldsToRecordings`), the
+station's own words when the library has none. It is behind `rotation.breaks`, since a jingle is the
+station interrupting its music, is not scaled by the presenter's chattiness, and has no per-broadcast
+override. The two rules coexist: each counts every `jingle` in the order, so the tighter one decides.
 
 **Minutes rather than an SQL `interval`**, for `starts_at_minutes`'s reason — every occurrence is computed in
 JS against `Intl`, nothing does interval arithmetic in SQL, and `interval '1 mon'` is not a fixed number of

@@ -24,6 +24,7 @@ import type { ResolvedRules } from './rotation.rules.js';
 import type { BreakRequestResult, BreakUrgency, StoredBreakRequest } from './break.request.js';
 import { TALK_BREAK_KIND } from './talk.break.writer.js';
 import { WELCOME_KIND } from './welcome.writer.js';
+import { JINGLE_KIND } from './jingle.writer.js';
 
 /**
  * The kind of break whose audio already exists, because somebody recorded it and
@@ -549,6 +550,32 @@ export class BreakPlanner {
     }
 
     /**
+     * Whether a listener arriving now will hear a jingle before a welcome could reach them.
+     *
+     * A welcome is rendered first and then put in front of the first record at or after the head
+     * (see {@link injectRequested}), so everything before that record is what the listener hears
+     * first. A jingle anywhere in that stretch, airing, with the player or still to come, is the
+     * station saying its own name to them already, and a welcome on top of it is the station saying
+     * it twice. So the jingle stands in for the greeting and the director does not ask for one.
+     *
+     * Nothing is removed and nothing is retired: this only decides whether a welcome is worth
+     * requesting. A jingle an operator has cut, or one the station passed over, greets nobody.
+     */
+    greetedByJingle(lineup: StationLineup): boolean {
+        const items = lineup.all();
+        const head = lineup.committedThrough();
+        const landing = items.findIndex((item, index) => index >= head && item.kind !== 'segment');
+        const heard = landing < 0 ? items : items.slice(0, landing);
+
+        return heard.some(
+            item =>
+                item.kind === 'segment' &&
+                item.segmentKind === JINGLE_KIND &&
+                (item.state === 'airing' || item.state === 'handed' || item.state === 'planned'),
+        );
+    }
+
+    /**
      * Whether this break can be produced at all, as a sentence saying why not.
      *
      * Public because a request is judged BEFORE anything is written down, which is what stops the
@@ -706,7 +733,9 @@ export class BreakPlanner {
         //
         // Undefined is still an ordinary answer and is still dropped. `projectAirTimes` runs out past
         // the end of the order, which is a slot the walk can reach and the clock cannot describe.
-        const claim = (atIndex: number, band?: ClockBand, airsAt?: number): void => {
+        // `band` is what claimed the slot: an operator's band, or a kind the station's own rules plant
+        // exactly as if one had asked for it (a jingle). Absent is the station's own talk break.
+        const claim = (atIndex: number, band?: Pick<ClockBand, 'kind' | 'topic'>, airsAt?: number): void => {
             if (taken.has(atIndex)) return;
             taken.add(atIndex);
             slots.push({
@@ -807,6 +836,20 @@ export class BreakPlanner {
             // could explain.
             const everyMs = Math.max(1, Math.round(rules.breakEveryMinutes * CHATTINESS_SPACING[chattiness])) * 60_000;
             for (const at of placementsFor(items, cursor, everyMs, isStationBreak, pending, blockedBy(taken))) claim(at, undefined, projected[at]);
+        }
+
+        // ── the station's jingles, after every break ───────────────────────────
+        // Last, so a talk break or a band always has first pick of a boundary and a jingle takes what
+        // is left: `blockedBy(taken)` keeps it off, and one either side of, every slot claimed above.
+        // The slot carries the kind as a band would, so `fill` sends it through `fillBand` exactly as
+        // an operator's `jingle` band: a recording if there is one, the station's own words if not.
+        // Not scaled by chattiness, which is about the presenter talking; this is the station's own
+        // imaging, and it is the same whoever is on.
+        if (rules.jingleEveryMinutes > 0) {
+            const counts = (item: StationLineupSegmentItem): boolean => item.segmentKind === JINGLE_KIND;
+            const everyMs = Math.max(1, Math.round(rules.jingleEveryMinutes)) * 60_000;
+            for (const at of placementsFor(items, cursor, everyMs, counts, sameKind(slots, JINGLE_KIND), blockedBy(taken)))
+                claim(at, { kind: JINGLE_KIND }, projected[at]);
         }
 
         return slots.sort((left, right) => left.atIndex - right.atIndex);
@@ -1230,6 +1273,9 @@ export class BreakPlanner {
         // Read at most once per kind, and only for a kind a band actually asked for, so a station
         // with no schedule pays nothing for this.
         const shelved = new Map<string, readonly Segment[]>();
+        // The recording each kind last drew this pass, so two drawn together are two different ones.
+        // `previousIdent`'s rule, kept per kind because a band can name any kind.
+        const drawn = new Map<string, string>();
 
         for (const { atIndex, band, topic, airsAt } of wanted) {
             // A slot the operator's clock placed is filled with EXACTLY the kind they named, and
@@ -1241,7 +1287,7 @@ export class BreakPlanner {
             // writes a clock, never once said what time it was. What makes a break a band's is that
             // a time was asked for, not which kind was named.
             if (band !== undefined) {
-                const planted = await this.fillBand(band, atIndex, shelved, airsAt, topic, onOrder);
+                const planted = await this.fillBand(band, atIndex, shelved, drawn, airsAt, topic, onOrder);
                 if (planted !== undefined) placements.push(planted);
                 // The alternation is deliberately NOT advanced. What the operator scheduled is not
                 // the station taking its turn at anything.
@@ -1285,6 +1331,11 @@ export class BreakPlanner {
      * holds none — is an ordinary outcome and says so once, because a station whose schedule names
      * `news` before anything can produce news is a station mid-setup rather than a broken one.
      *
+     * A kind whose writer yields to recordings (a jingle) is tried the other way round: the shelf
+     * first, and the writer only when the shelf is empty. Writing first would silence every
+     * recording an operator made on purpose. It is not the rule for every kind because the shelf of
+     * `talkbreak` is every break the station has ever rendered, and drawing from it would replay them.
+     *
      * Nothing here validates the kind against a list. `segments.kind` is free text on purpose, so a
      * station that wants sponsor spots writes `:20 sponsor`, drops the recordings in the inbox, and
      * needs no migration and no code.
@@ -1293,6 +1344,7 @@ export class BreakPlanner {
         kind: string,
         atIndex: number,
         shelved: Map<string, readonly Segment[]>,
+        drawn: Map<string, string>,
         airsAt: number | undefined,
         topic: ClockBandSubject | undefined,
         onOrder: Set<string>,
@@ -1340,6 +1392,12 @@ export class BreakPlanner {
             };
         }
 
+        // Recordings first, for a kind that asks for it. See the note on the method.
+        if (this.writers.yieldsToRecordings(kind)) {
+            const recorded = await this.shelf(kind, shelved, drawn, atIndex);
+            if (recorded !== undefined) return recorded;
+        }
+
         if (this.writers.canWrite(kind) && this.speech.speaker() !== undefined) {
             // `airsAt` travels on the row rather than in the write job's payload, because the words
             // are asked for on a LATER pass than this one and nothing recomputes the schedule in
@@ -1359,15 +1417,30 @@ export class BreakPlanner {
             return { segmentId: segment.id, atIndex, kind, written: true };
         }
 
+        const recorded = await this.shelf(kind, shelved, drawn, atIndex);
+        if (recorded === undefined) this.logger.info('director: the station clock asks for a break nothing can produce', { kind });
+        return recorded;
+    }
+
+    /**
+     * A recording of this kind off the shelf, or `undefined` when the library holds none.
+     *
+     * Read at most once per kind per pass through `shelved`, and never the recording this kind drew
+     * last in the same pass where the library has another.
+     */
+    private async shelf(
+        kind: string,
+        shelved: Map<string, readonly Segment[]>,
+        drawn: Map<string, string>,
+        atIndex: number,
+    ): Promise<Placement | undefined> {
         if (!shelved.has(kind)) shelved.set(kind, await this.segments.listReady(kind));
         const available = shelved.get(kind) ?? [];
+        if (available.length === 0) return undefined;
 
-        if (available.length === 0) {
-            this.logger.info('director: the station clock asks for a break nothing can produce', { kind });
-            return undefined;
-        }
-
-        return { segmentId: choose(available, undefined).id, atIndex, kind, written: false };
+        const segment = choose(available, drawn.get(kind));
+        drawn.set(kind, segment.id);
+        return { segmentId: segment.id, atIndex, kind, written: false };
     }
 
     /**

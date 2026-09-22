@@ -68,6 +68,8 @@ const build = (
         carried?: SyndicatedAnswer;
         /** What a `narration` band is answered with. Declines by default, as `carried` does. */
         reading?: SyndicatedAnswer;
+        /** Kinds whose writer yields to a recording. None by default, which is every kind but a jingle. */
+        yields?: readonly string[];
     } = {},
 ) => {
     // Answers for the KIND it was asked about, the way the repository does. A blanket answer would
@@ -169,7 +171,10 @@ const build = (
     // The format clock, as the rows the planner is handed. Only `active` is reached from here: a
     // band that is switched off never leaves the repository.
     const clockBands = { active: vi.fn(async () => options.bands ?? []) };
-    const writers = { canWrite: vi.fn(() => options.canWrite ?? false) };
+    const writers = {
+        canWrite: vi.fn(() => options.canWrite ?? false),
+        yieldsToRecordings: vi.fn((kind: string) => options.yields?.includes(kind) ?? false),
+    };
     const speech = { speaker: vi.fn(() => ((options.speaker ?? options.canWrite) ? { record: { id: 'deadair.kokoro' } } : undefined)) };
     const send = vi.fn(async () => {});
     // The presenter, whose `chattiness` scales the station's own spacing floor. Absent by default,
@@ -1968,5 +1973,198 @@ describe('BreakPlanner.ripen', () => {
 
             expect(plan).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'req-1', airsAt: now + TRACK_MINUTES * 60_000 }));
         });
+    });
+});
+
+// A kind an operator records on purpose. The shelf is drawn before anything is written, so a station
+// with jingles recorded hears those, and one with none still has the station's own.
+describe('BreakPlanner filling a jingle', () => {
+    const jingleBand: ClockBand[] = [{ at: 'interval', everyMs: 2 * TRACK_MINUTES * 60_000, kind: 'jingle' } as ClockBand];
+
+    /** The segment id at each jingle position, in order. */
+    const jinglesIn = (lineup: StationLineup): string[] =>
+        lineup.all().flatMap(item => (item.kind === 'segment' && item.segmentKind === 'jingle' ? [item.segmentId] : []));
+
+    it('plays a recording rather than writing one, when the library holds any', async () => {
+        const { planner, plan } = build({
+            canWrite: true,
+            yields: ['jingle'],
+            idents: [recorded('j-1', 'jingle'), recorded('j-2', 'jingle')],
+            bands: jingleBand,
+        });
+        const lineup = await lineupOf(16);
+
+        await planner.plant(lineup, rules({ breaks: true, breakEveryMinutes: 0 }), clock());
+
+        const planted = jinglesIn(lineup);
+        expect(planted.length).toBeGreaterThan(1);
+        expect(planted.every(id => id === 'j-1' || id === 'j-2')).toBe(true);
+        expect(plan.mock.calls.filter(([input]) => input.kind === 'jingle')).toHaveLength(0);
+    });
+
+    it('never draws the same recording twice running in one pass, where there is another', async () => {
+        const { planner } = build({
+            canWrite: true,
+            yields: ['jingle'],
+            idents: [recorded('j-1', 'jingle'), recorded('j-2', 'jingle')],
+            bands: jingleBand,
+        });
+        const lineup = await lineupOf(24);
+
+        await planner.plant(lineup, rules({ breaks: true, breakEveryMinutes: 0 }), clock());
+
+        const planted = jinglesIn(lineup);
+        for (let index = 1; index < planted.length; index++) expect(planted[index]).not.toBe(planted[index - 1]);
+    });
+
+    it('writes its own when the library has none', async () => {
+        const { planner, plan } = build({ canWrite: true, yields: ['jingle'], idents: [], bands: jingleBand });
+        const lineup = await lineupOf(16);
+
+        await planner.plant(lineup, rules({ breaks: true, breakEveryMinutes: 0 }), clock());
+
+        expect(plan.mock.calls.filter(([input]) => input.kind === 'jingle').length).toBeGreaterThan(0);
+    });
+
+    it('still writes first for a kind whose writer does not yield, recordings or not', async () => {
+        // The ordinary order, unchanged: a `talkbreak` shelf is every break the station ever rendered.
+        const { planner, plan } = build({
+            canWrite: true,
+            idents: [recorded('s-1', 'sponsorspot')],
+            bands: [{ at: 'interval', everyMs: 2 * TRACK_MINUTES * 60_000, kind: 'sponsorspot' } as ClockBand],
+        });
+        const lineup = await lineupOf(16);
+
+        await planner.plant(lineup, rules({ breaks: true, breakEveryMinutes: 0 }), clock());
+
+        expect(plan.mock.calls.filter(([input]) => input.kind === 'sponsorspot').length).toBeGreaterThan(0);
+    });
+});
+
+// `rotation.jingleEveryMinutes`: the station's own floor for jingles, the way `breakEveryMinutes` is
+// the floor for talk breaks. Every fixture record is five minutes, so ten minutes is two records.
+describe('BreakPlanner spacing its own jingles', () => {
+    const kindAt = (lineup: StationLineup): Map<number, string | undefined> =>
+        new Map(lineup.all().flatMap((item, index) => (item.kind === 'segment' ? [[index, item.segmentKind] as const] : [])));
+
+    const jingling = (overrides: Parameters<typeof build>[0] = {}) =>
+        build({ canWrite: true, yields: ['jingle'], idents: [recorded('j-1', 'jingle'), recorded('j-2', 'jingle')], ...overrides });
+
+    it('plants nothing while the setting is zero, which is the default', async () => {
+        const { planner } = jingling();
+        const lineup = await lineupOf(20);
+
+        await planner.plant(lineup, rules({ breaks: true, breakEveryMinutes: 0 }), clock());
+
+        expect(segmentsAt(lineup)).toEqual([]);
+    });
+
+    it('plants a jingle every so many minutes of programme, and never into the commit window', async () => {
+        const { planner } = jingling();
+        const lineup = await lineupOf(20);
+
+        await planner.plant(lineup, { ...rules({ breaks: true, breakEveryMinutes: 0 }), jingleEveryMinutes: 2 * TRACK_MINUTES }, clock());
+
+        const at = segmentsAt(lineup);
+        expect(at.length).toBeGreaterThan(3);
+        expect(at[0]).toBeGreaterThanOrEqual(PLANT_AHEAD);
+        expect([...kindAt(lineup).values()].every(kind => kind === 'jingle')).toBe(true);
+        // Two records between each, which is ten minutes at five a record.
+        for (let index = 1; index < at.length; index++) expect(at[index]! - at[index - 1]!).toBe(3);
+    });
+
+    it('never puts a jingle beside a break, and lets the break have the boundary', async () => {
+        const { planner } = jingling();
+        const lineup = await lineupOf(40);
+
+        await planner.plant(
+            lineup,
+            { ...rules({ breaks: true, breakEveryMinutes: 4 * TRACK_MINUTES }), jingleEveryMinutes: 2 * TRACK_MINUTES },
+            clock(),
+        );
+
+        const kinds = kindAt(lineup);
+        expect([...kinds.values()]).toContain('jingle');
+        expect([...kinds.values()].some(kind => kind !== 'jingle')).toBe(true);
+        const at = [...kinds.keys()];
+        for (let index = 1; index < at.length; index++) expect(at[index]! - at[index - 1]!).toBeGreaterThan(1);
+    });
+
+    it('doubles nothing on a second pass over the same order', async () => {
+        const { planner } = jingling();
+        const lineup = await lineupOf(20);
+        const withJingles = { ...rules({ breaks: true, breakEveryMinutes: 0 }), jingleEveryMinutes: 2 * TRACK_MINUTES };
+
+        await planner.plant(lineup, withJingles, clock());
+        const first = segmentsAt(lineup);
+        await planner.plant(lineup, withJingles, clock());
+
+        expect(segmentsAt(lineup)).toEqual(first);
+    });
+
+    it('plants none with breaks switched off, since a jingle is the station interrupting its music', async () => {
+        const { planner } = jingling();
+        const lineup = await lineupOf(20);
+
+        await planner.plant(lineup, { ...rules({ breaks: false }), jingleEveryMinutes: 2 * TRACK_MINUTES }, clock());
+
+        expect(segmentsAt(lineup)).toEqual([]);
+    });
+
+    it('writes its own jingles when nothing is recorded', async () => {
+        const { planner, plan } = jingling({ idents: [] });
+        const lineup = await lineupOf(20);
+
+        await planner.plant(lineup, { ...rules({ breaks: true, breakEveryMinutes: 0 }), jingleEveryMinutes: 2 * TRACK_MINUTES }, clock());
+
+        expect(plan.mock.calls.length).toBeGreaterThan(0);
+        expect(plan.mock.calls.every(([input]) => input.kind === 'jingle')).toBe(true);
+    });
+});
+
+// A listener arriving just before a jingle hears the station's name from it, so the director does not
+// ask for a welcome on top. What decides it is the stretch a rendered welcome would be put in front of.
+describe('BreakPlanner.greetedByJingle', () => {
+    /** Two records already with the player, so the head is index 2. */
+    const withHead = async () => lineupOf(10, 2);
+    const segmentAt = (lineup: StationLineup, atIndex: number, segmentKind: string) =>
+        expect(lineup.insertSegments([{ segmentId: `${segmentKind}-${atIndex}`, atIndex, segmentKind }])).toEqual({ ok: true });
+
+    it('is greeted by a jingle still to come at the head', async () => {
+        const lineup = await withHead();
+        segmentAt(lineup, 2, 'jingle');
+
+        expect(build().planner.greetedByJingle(lineup)).toBe(true);
+    });
+
+    it('is greeted by a jingle the player already holds', async () => {
+        const lineup = await withHead();
+        segmentAt(lineup, 2, 'jingle');
+        hand(lineup, 1);
+
+        expect(build().planner.greetedByJingle(lineup)).toBe(true);
+    });
+
+    it('is not greeted by a jingle past the record a welcome would go in front of', async () => {
+        const lineup = await withHead();
+        segmentAt(lineup, 5, 'jingle');
+
+        expect(build().planner.greetedByJingle(lineup)).toBe(false);
+    });
+
+    it('is not greeted by a jingle an operator cut', async () => {
+        const lineup = await withHead();
+        segmentAt(lineup, 2, 'jingle');
+        const jingle = lineup.all().find(item => item.kind === 'segment')!;
+        expect(lineup.remove(jingle.id)).toEqual({ ok: true });
+
+        expect(build().planner.greetedByJingle(lineup)).toBe(false);
+    });
+
+    it('is not greeted by an ident, which is left to the welcome as it always was', async () => {
+        const lineup = await withHead();
+        segmentAt(lineup, 2, 'ident');
+
+        expect(build().planner.greetedByJingle(lineup)).toBe(false);
     });
 });
