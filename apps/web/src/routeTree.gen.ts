@@ -30,6 +30,8 @@ import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsAnalysisRouteImport } from './routes/settings/analysis'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings/appearance'
 import { Route as SettingsArtworkRouteImport } from './routes/settings/artwork'
+import { Route as SettingsBreaksRouteImport } from './routes/settings/breaks'
+import { Route as SettingsBulletinsRouteImport } from './routes/settings/bulletins'
 import { Route as SettingsGrantsRouteImport } from './routes/settings/grants'
 import { Route as SettingsHousekeepingRouteImport } from './routes/settings/housekeeping'
 import { Route as SettingsLlmRouteImport } from './routes/settings/llm'
@@ -155,6 +157,16 @@ const SettingsArtworkRoute = SettingsArtworkRouteImport.update({
   path: '/settings/artwork',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsBreaksRoute = SettingsBreaksRouteImport.update({
+  id: '/settings/breaks',
+  path: '/settings/breaks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsBulletinsRoute = SettingsBulletinsRouteImport.update({
+  id: '/settings/bulletins',
+  path: '/settings/bulletins',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsGrantsRoute = SettingsGrantsRouteImport.update({
   id: '/settings/grants',
   path: '/settings/grants',
@@ -270,6 +282,8 @@ export interface FileRoutesByFullPath {
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
+  '/settings/breaks': typeof SettingsBreaksRoute
+  '/settings/bulletins': typeof SettingsBulletinsRoute
   '/settings/grants': typeof SettingsGrantsRoute
   '/settings/housekeeping': typeof SettingsHousekeepingRoute
   '/settings/llm': typeof SettingsLlmRoute
@@ -312,6 +326,8 @@ export interface FileRoutesByTo {
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
+  '/settings/breaks': typeof SettingsBreaksRoute
+  '/settings/bulletins': typeof SettingsBulletinsRoute
   '/settings/grants': typeof SettingsGrantsRoute
   '/settings/housekeeping': typeof SettingsHousekeepingRoute
   '/settings/llm': typeof SettingsLlmRoute
@@ -355,6 +371,8 @@ export interface FileRoutesById {
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
+  '/settings/breaks': typeof SettingsBreaksRoute
+  '/settings/bulletins': typeof SettingsBulletinsRoute
   '/settings/grants': typeof SettingsGrantsRoute
   '/settings/housekeeping': typeof SettingsHousekeepingRoute
   '/settings/llm': typeof SettingsLlmRoute
@@ -399,6 +417,8 @@ export interface FileRouteTypes {
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
+    | '/settings/breaks'
+    | '/settings/bulletins'
     | '/settings/grants'
     | '/settings/housekeeping'
     | '/settings/llm'
@@ -441,6 +461,8 @@ export interface FileRouteTypes {
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
+    | '/settings/breaks'
+    | '/settings/bulletins'
     | '/settings/grants'
     | '/settings/housekeeping'
     | '/settings/llm'
@@ -483,6 +505,8 @@ export interface FileRouteTypes {
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
+    | '/settings/breaks'
+    | '/settings/bulletins'
     | '/settings/grants'
     | '/settings/housekeeping'
     | '/settings/llm'
@@ -526,6 +550,8 @@ export interface RootRouteChildren {
   SettingsAnalysisRoute: typeof SettingsAnalysisRoute
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsArtworkRoute: typeof SettingsArtworkRoute
+  SettingsBreaksRoute: typeof SettingsBreaksRoute
+  SettingsBulletinsRoute: typeof SettingsBulletinsRoute
   SettingsGrantsRoute: typeof SettingsGrantsRoute
   SettingsHousekeepingRoute: typeof SettingsHousekeepingRoute
   SettingsLlmRoute: typeof SettingsLlmRoute
@@ -700,6 +726,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArtworkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/breaks': {
+      id: '/settings/breaks'
+      path: '/settings/breaks'
+      fullPath: '/settings/breaks'
+      preLoaderRoute: typeof SettingsBreaksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/bulletins': {
+      id: '/settings/bulletins'
+      path: '/settings/bulletins'
+      fullPath: '/settings/bulletins'
+      preLoaderRoute: typeof SettingsBulletinsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/grants': {
       id: '/settings/grants'
       path: '/settings/grants'
@@ -854,6 +894,8 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsAnalysisRoute: SettingsAnalysisRoute,
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsArtworkRoute: SettingsArtworkRoute,
+  SettingsBreaksRoute: SettingsBreaksRoute,
+  SettingsBulletinsRoute: SettingsBulletinsRoute,
   SettingsGrantsRoute: SettingsGrantsRoute,
   SettingsHousekeepingRoute: SettingsHousekeepingRoute,
   SettingsLlmRoute: SettingsLlmRoute,

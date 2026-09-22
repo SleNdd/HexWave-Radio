@@ -92,6 +92,64 @@ describe('the settings registry', () => {
         expect(findDescriptor('station.djName')?.group).toBe('personas');
     });
 
+    it('keeps how often the station talks in the Breaks section', () => {
+        // Split out of Rotation, which is about what plays. Each of these is a lineup override or a
+        // limit on one, so an operator deciding how chatty the station is finds them together.
+        for (const key of [
+            ROTATION_KEYS.breaks,
+            ROTATION_KEYS.breakEveryMinutes,
+            ROTATION_KEYS.jingleEveryMinutes,
+            ROTATION_KEYS.welcome,
+            ROTATION_KEYS.changeovers,
+            ROTATION_KEYS.callins,
+            ROTATION_KEYS.callinEveryMinutes,
+            'rotation.breakWords',
+            'rotation.storyWords',
+        ]) {
+            expect(findDescriptor(key)?.group, key).toBe('breaks');
+        }
+    });
+
+    it('keeps what a bulletin reads in the Bulletins section', () => {
+        // The news, the weather and the date: what the station reads out of the world, split out of
+        // Rotation, which is about records. When one airs is the format clock's business.
+        for (const key of [
+            'rotation.newsStoriesMin',
+            'rotation.newsStoriesMax',
+            'rotation.newsMaxAgeHours',
+            'rotation.newsFeeds',
+            'rotation.weatherDays',
+            'rotation.weatherMaxAgeMinutes',
+            'rotation.weatherInTalk',
+            'rotation.dateInTalk',
+            'rotation.almanacLean',
+        ]) {
+            expect(findDescriptor(key)?.group, key).toBe('bulletins');
+        }
+    });
+
+    it('keeps every station-wide phrasing in the group the Voice page draws', () => {
+        // Drawn by the Phrasings tab and by no settings section. Back in `rotation` they would be six
+        // boxes of eight rows at the bottom of the longest page in the console, a long way from
+        // anything else about what the station says.
+        for (const key of [
+            'rotation.welcomeTemplates',
+            'rotation.changeoverTemplates',
+            'rotation.jingleTemplates',
+            'rotation.newsTemplates',
+            'rotation.weatherTemplates',
+            'rotation.almanacTemplates',
+        ]) {
+            expect(findDescriptor(key)?.group, key).toBe('phrasings');
+        }
+    });
+
+    it('declares no station-wide talk-break phrasings', () => {
+        // They are written on each character. A box here would read as the station's voice while
+        // changing nothing a listener hears, since every character's own phrasings go first.
+        expect(findDescriptor('rotation.breakTemplates')).toBeUndefined();
+    });
+
     it('keeps what Icecast advertises on the stream card', () => {
         // Nothing but Icecast reads these. On the station card, beside the name, they read as the
         // station's identity and invite the question of what they do there.

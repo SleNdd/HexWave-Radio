@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SdkError } from '@deadair/sdk';
 import type { StationSettings } from '@deadair/sdk';
 
-import { SettingsSectionPage } from '../../../src/components/settings/settings.page';
+import { SettingsGroupPage, SettingsSectionPage } from '../../../src/components/settings/settings.page';
 import { SETTINGS_SECTIONS } from '../../../src/components/settings/settings.shell';
 import { render, screen, setupUser, waitFor } from '../../utils/render';
 
@@ -58,7 +58,7 @@ const SETTINGS: StationSettings = {
         { group: 'stream', key: 'stream.bitrate', label: 'Bitrate (kbps)', type: 'string', default: '128' },
         { group: 'mail', key: 'mail.host', label: 'SMTP server', type: 'string', default: '' },
         { group: 'mail', key: 'mail.password', label: 'Password', type: 'secret' },
-        { group: 'rotation', key: 'rotation.breakEveryMinutes', label: 'Minutes between breaks', type: 'number', default: 15 },
+        { group: 'breaks', key: 'rotation.breakEveryMinutes', label: 'Minutes between breaks', type: 'number', default: 15 },
         {
             group: 'playout',
             key: 'playout.airMode',
@@ -103,7 +103,7 @@ describe('SettingsSectionPage', () => {
 
         await screen.findByLabelText('Station name');
         expect(screen.queryByLabelText('Minutes between breaks')).not.toBeInTheDocument();
-        expect(screen.queryByRole('heading', { name: 'Rotation' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: 'Breaks' })).not.toBeInTheDocument();
     });
 
     // Station used to be every one of these under one save: identity, streams, housekeeping and
@@ -153,13 +153,13 @@ describe('SettingsSectionPage', () => {
 
     it('sends only the section that was saved', async () => {
         // Each card saves on its own, and the API write is partial. If a card submitted the whole
-        // page, saving the station's name would also rewrite every rotation rule.
+        // page, saving the station's name would also rewrite every break rule.
         getSettings.mockResolvedValue(settingsOf());
         updateSettings.mockResolvedValue(settingsOf());
-        render(<SettingsSectionPage section="rotation" />);
+        render(<SettingsSectionPage section="breaks" />);
         await screen.findByLabelText('Minutes between breaks');
 
-        await setupUser().click(screen.getByRole('button', { name: 'Save rotation' }));
+        await setupUser().click(screen.getByRole('button', { name: 'Save breaks' }));
 
         await waitFor(() => {
             expect(updateSettings).toHaveBeenCalledTimes(1);
@@ -290,22 +290,26 @@ describe('SettingsSectionPage', () => {
         // line tall.
         getSettings.mockResolvedValue(
             settingsOf({
-                descriptors: [{ group: 'rotation', key: 'rotation.breakTemplates', label: 'What the station says', type: 'text', default: '' }],
-                values: { 'rotation.breakTemplates': 'That was {{previous.title}}.\nYou just heard {{previous.title}}.' },
+                descriptors: [
+                    { group: 'phrasings', key: 'rotation.jingleTemplates', label: 'What the station says in a jingle', type: 'text', default: '' },
+                ],
+                values: { 'rotation.jingleTemplates': 'This is {{station.name}}.\nYou are listening to {{station.name}}.' },
             }),
         );
 
-        render(<SettingsSectionPage section="rotation" />);
+        render(<SettingsGroupPage group="phrasings" label="Phrasings" />);
 
-        const box = await screen.findByLabelText('What the station says');
+        const box = await screen.findByLabelText('What the station says in a jingle');
         expect(box.tagName).toBe('TEXTAREA');
-        expect(box).toHaveValue('That was {{previous.title}}.\nYou just heard {{previous.title}}.');
+        expect(box).toHaveValue('This is {{station.name}}.\nYou are listening to {{station.name}}.');
     });
 
     it('sends a multi-line setting back as the plain string it is', async () => {
         const templates = settingsOf({
-            descriptors: [{ group: 'rotation', key: 'rotation.breakTemplates', label: 'What the station says', type: 'text', default: '' }],
-            values: { 'rotation.breakTemplates': 'That was {{previous.title}}.' },
+            descriptors: [
+                { group: 'phrasings', key: 'rotation.jingleTemplates', label: 'What the station says in a jingle', type: 'text', default: '' },
+            ],
+            values: { 'rotation.jingleTemplates': 'This is {{station.name}}.' },
         });
         getSettings.mockResolvedValue(templates);
         // The settings as they now stand, which is what the route answers with and what the
@@ -314,12 +318,12 @@ describe('SettingsSectionPage', () => {
         // partial one crashes an unrelated card and shows up as an unhandled error attributed to
         // this test.
         updateSettings.mockResolvedValue(templates);
-        render(<SettingsSectionPage section="rotation" />);
-        await screen.findByLabelText('What the station says');
+        render(<SettingsGroupPage group="phrasings" label="Phrasings" />);
+        await screen.findByLabelText('What the station says in a jingle');
 
-        await setupUser().click(screen.getByRole('button', { name: 'Save rotation' }));
+        await setupUser().click(screen.getByRole('button', { name: 'Save phrasings' }));
 
-        expect(updateSettings).toHaveBeenCalledWith({ values: { 'rotation.breakTemplates': 'That was {{previous.title}}.' } });
+        expect(updateSettings).toHaveBeenCalledWith({ values: { 'rotation.jingleTemplates': 'This is {{station.name}}.' } });
     });
 
     it('says so when the settings cannot be read', async () => {

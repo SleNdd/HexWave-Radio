@@ -57,7 +57,11 @@ export const CHANGEOVER_KIND = 'changeover';
 /** What `segments.writer` records for anything written here. */
 export const CHANGEOVER_WRITER = 'deterministic';
 
-/** The `deadair.settings` key for the phrasings. In `rotation`, beside the station's other words. */
+/**
+ * The `deadair.settings` key for the phrasings. In the `phrasings` group, drawn on the Voice page's
+ * Phrasings tab; the `rotation.` prefix is from when they sat under Rotation, kept so a stored row
+ * still answers.
+ */
 export const CHANGEOVER_KEYS = {
     templates: 'rotation.changeoverTemplates',
 } as const;

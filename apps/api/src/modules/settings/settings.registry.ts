@@ -19,7 +19,7 @@ import {
 import { DEFAULT_RESTART_STUCK_CHAIN, RESTART_STUCK_CHAIN_KEY } from '#modules/playout/audio.chain.watchdog.js';
 import { DEFAULT_AUTO_EXTEND, DEFAULT_RULES, MIX_IN_EVERY_RANGE, ROTATION_KEYS } from '#modules/director/rotation.rules.js';
 import { DEFAULT_MAX_TRACK_SECONDS, DEFAULT_MIN_TRACK_SECONDS, TRACK_LENGTH_KEYS } from '#modules/director/track.length.js';
-import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_VOCABULARY } from '#modules/director/break.templates.js';
+import { TEMPLATE_KEYS } from '#modules/director/break.templates.js';
 import {
     DEFAULT_THREAD_GAP_MINUTES,
     MAX_THREAD_GAP_MINUTES,
@@ -177,11 +177,11 @@ export interface SettingDescriptor extends ConfigField {
     /**
      * Which part of the console owns this setting.
      *
-     * A section of the settings page for all but two of them. `schedule` and `personas` are the
-     * exceptions and are deliberately not drawn there: what the station plays between blocks is a
-     * question about the timetable, and what an unnamed host is called is a question about the
-     * roster, so each is edited beside the thing it explains, by a panel that draws its own controls.
-     * See the groups' own note below.
+     * A section of the settings page for all but three of them. `schedule`, `personas` and
+     * `phrasings` are the exceptions and are deliberately not drawn there: what the station plays
+     * between blocks is a question about the timetable, what an unnamed host is called is a question
+     * about the roster, and the words the station says are a question about its voice, so each is
+     * edited beside the thing it explains. See the groups' own note below.
      */
     group: SettingGroup;
 }
@@ -190,7 +190,8 @@ export interface SettingDescriptor extends ConfigField {
  * The groups there are, in the order the settings page draws the ones it draws.
  *
  * Not every group is a card on that page. `schedule` is owned by `SustainingPanel` on the schedule
- * page and `personas` by `PresenterNamePanel` on the characters page, which is why
+ * page, `personas` by `PresenterNamePanel` on the characters page and `phrasings` by the Voice
+ * page's Phrasings tab, which is why
  * `SETTINGS_SECTIONS` in `settings.shell.tsx` is a list of its own rather than this one: a
  * group that is not in that list is drawn by whoever claimed it, and a group in neither is a bug
  * `settings.registry.test.ts` cannot see. Adding one means deciding which page draws it.
@@ -201,6 +202,10 @@ export interface SettingDescriptor extends ConfigField {
  * `SettingGroup` in `settings.types.ck`, so the wire enum and this list cannot disagree about what
  * a group is called. The passwords were a fourth group, `secrets`, until none of them was declared
  * any more; the note above `mail` below says why.
+ *
+ * `rotation` went the same way at forty-two fields and six boxes of phrasings: what the station
+ * plays stayed, how often it talks went to `breaks`, what a bulletin reads went to `bulletins`, and
+ * the words it says around them went to `phrasings`, off the settings page altogether.
  */
 export const SETTING_GROUPS = [
     'station',
@@ -208,12 +213,15 @@ export const SETTING_GROUPS = [
     'housekeeping',
     'mail',
     'rotation',
+    'breaks',
+    'bulletins',
     'playout',
     'render',
     'llm',
     'analysis',
     'schedule',
     'personas',
+    'phrasings',
     'providers',
 ] as const;
 
@@ -738,7 +746,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: "How many of the playlist's own records play between one mixed-in record and the next. Four is roughly one in five of what a listener hears. A mixed-in record never goes next to a break, so the spacing can stretch by a record where one is in the way.",
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.breaks,
         label: 'Let the station interrupt itself',
         type: 'boolean',
@@ -746,7 +754,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Whether the station plants its own idents and talk breaks into a rotation.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.breakEveryMinutes,
         label: 'Minutes between breaks',
         type: 'number',
@@ -755,7 +763,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Fifteen is around as long as a station can go without saying its own name before it sounds like a playlist. Each sort of break keeps its own spacing, so a news bulletin does not push the next ident back.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.jingleEveryMinutes,
         label: 'Minutes between jingles',
         type: 'number',
@@ -766,11 +774,11 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help:
             'A few seconds of the station saying its own name between two records, this often. Zero is off. A jingle never lands beside a ' +
             'break and a break always wins the boundary. Recordings dropped in the jingle folder, or uploaded as the jingle kind, are played ' +
-            'first; with none, the station says one of its own lines below, ending on a hit from the soundboard if the presenter has one. ' +
+            'first; with none, the station says one of its own lines, under Voice, Phrasings, ending on a hit from the soundboard if the presenter has one. ' +
             'Ten or so sounds like a commercial station; thirty is a nudge.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: BREAK_WORD_KEYS.talk,
         label: 'Words a talk break may run to',
         type: 'number',
@@ -787,7 +795,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'How long the presenter may talk between two records. Forty is about fifteen seconds, which is a link rather than a monologue — and it is a ceiling rather than a target, so raising it lets a character run where it has something to say instead of making every break longer. A persona given latitude of its own still gets whichever is the greater.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: BREAK_WORD_KEYS.story,
         label: 'Words a story may run to',
         type: 'number',
@@ -800,7 +808,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'How long the presenter may take over one of their own stories, when your clock asks for one. A hundred and twenty words is around three quarters of a minute. Stories are written on each persona; a character with none passes the slot over rather than filling it.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.welcome,
         label: 'Say hello to a new listener',
         type: 'boolean',
@@ -809,7 +817,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Whether the station greets somebody who tunes in to an empty room, rather than leaving them to work out what they are listening to at the next break. It is held off for twenty minutes afterwards, so a phone changing networks does not get greeted twice.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.changeovers,
         label: 'Say so when the show changes',
         type: 'boolean',
@@ -818,7 +826,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Whether the station marks the timetable moving from one show to the next, or into what it plays between shows. It is said between the last record of the old show and the first of the new, by whoever presents the new one, thanking the last host when that was somebody else. Only a change the timetable makes is marked: putting something on air yourself is not.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.callins,
         label: 'Take calls',
         type: 'boolean',
@@ -826,7 +834,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Whether somebody phones in while the station is on air. A call is a short programme rather than a break: your host takes it, a caller answers, and the few turns go into the running order as one block, each in its own voice. Who rings is drawn from the callers on the personas page, least recently heard first, so a station with none simply never takes one. Deliberately NOT under the breaks switch — a station that wants a DJ has said nothing about whether it wants a phone-in.',
     },
     {
-        group: 'rotation',
+        group: 'breaks',
         key: ROTATION_KEYS.callinEveryMinutes,
         label: 'Minutes between calls',
         type: 'number',
@@ -837,43 +845,46 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Airtime between one call ending and the next being asked for. Its own number rather than the break spacing, because a call runs minutes where a break runs seconds: at the break spacing the station would be on the phone for a fifth of the hour. The first call of a broadcast is not made to wait — the count starts once one has aired.',
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: WELCOME_KEYS.templates,
         label: 'What the station says to a new listener',
         type: 'text',
         default: WELCOME_TEMPLATES.join('\n'),
         dependsOn: ROTATION_KEYS.welcome,
         help:
-            'One phrasing per line, in the same syntax as the breaks above, with {{greeting}} for "good morning" and the like. ' +
-            'A greeting is deliberately not a back-announce: somebody who has just arrived did not hear the last record, so ' +
-            "{{previous.*}} is not offered here. Empty restores the station's own.",
+            'One phrasing per line, picked between so the station does not repeat itself. Fill in the record coming up with ' +
+            '{{next.title}} and {{next.artist}}, the station with {{station.name}}, the presenter with {{dj.name}} and "good morning" and the ' +
+            'like with {{greeting}}; wrap a part in [[double brackets]] to have it dropped when there is nothing to put in it; and start a ' +
+            'line with # to turn it off without losing it. A greeting is deliberately not a back-announce: somebody who has just arrived ' +
+            "did not hear the last record, so {{previous.*}} is not offered here. Empty restores the station's own. What a talk break says " +
+            'is written on each character instead.',
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: CHANGEOVER_KEYS.templates,
         label: 'What the station says when the show changes',
         type: 'text',
         default: CHANGEOVER_TEMPLATES.join('\n'),
         dependsOn: ROTATION_KEYS.changeovers,
         help:
-            'One phrasing per line, in the same syntax as the breaks above, with {{show.name}} for the show starting, {{outgoing.show}} for the one ending and ' +
+            'One phrasing per line, in the same syntax as the greetings above, with {{show.name}} for the show starting, {{outgoing.show}} for the one ending and ' +
             '{{outgoing.name}} for its host, which is only filled when that host is somebody else. The station picks a line thanking the last host when one fits, ' +
             "then one naming the new show, then one naming the old. No record is offered, before or after. Empty restores the station's own.",
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: JINGLE_KEYS.templates,
         label: 'What the station says in a jingle',
         type: 'text',
         default: JINGLE_TEMPLATES.join('\n'),
         dependsOn: ROTATION_KEYS.breaks,
         help:
-            'One phrasing per line, in the same syntax as the breaks above, said between two records when the station has no jingle recorded. ' +
+            'One phrasing per line, in the same syntax as the greetings above, said between two records when the station has no jingle recorded. ' +
             'Keep them short: a jingle that runs past a few seconds is a talk break. Only {{station.name}} and {{dj.name}} are offered, because a ' +
             "jingle is placed well ahead and must not name a record or the time of day. Empty restores the station's own.",
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: BULLETIN_KEYS.storiesMin,
         label: 'Headlines in a news bulletin',
         type: 'number',
@@ -893,7 +904,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'How many stories the station reads when the clock asks for news. A range rather than a number, because the story count is what makes one bulletin longer than the next — a fixed one is a news round that is the same shape every half hour. Around three is a headline round; a station that stops for two minutes every half hour is a news station that plays records. Put both handles on the same number for a bulletin that is always the same length.',
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: BULLETIN_KEYS.storiesMax,
         // Not drawn on its own: the console gives this end the far handle of the control above. The
         // label is what `serializeSetting` calls it when it refuses one, so it still has to read as
@@ -905,7 +916,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         default: DEFAULT_STORY_COUNT_MAX,
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: BULLETIN_KEYS.maxAgeHours,
         label: 'How old a story may be (hours)',
         type: 'number',
@@ -913,7 +924,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         help: 'Anything older than this is not read. A feed that stopped updating yesterday would otherwise have the station reading last night as though it had just happened, and a listener cannot tell that from the station being wrong. A bulletin with nothing fresh enough is skipped rather than filled.',
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: NEWS_FEEDS_KEY,
         label: 'The feeds a bulletin reads',
         type: 'list',
@@ -930,18 +941,18 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'still offered to the presenter.',
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: NEWS_KEYS.templates,
         label: 'How the station introduces the news',
         type: 'text',
         default: NEWS_TEMPLATES.join('\n'),
         help:
-            'One phrasing per line, in the same syntax as the breaks below, with {{news.headlines}} for the stories themselves. ' +
+            'One phrasing per line, in the same syntax as the greetings above, with {{news.headlines}} for the stories themselves. ' +
             'The headlines are read as published and this decides only what is said around them, which is why every line has to carry ' +
             "{{news.headlines}} outside its [[optional]] parts. Empty restores the station's own.",
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: WEATHER_SOURCE_KEYS.days,
         label: 'How far ahead the weather looks',
         type: 'number',
@@ -953,7 +964,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             "alone. More than one is only read by a model, since the station's own phrasings mention today and no further.",
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: WEATHER_SOURCE_KEYS.maxAgeMinutes,
         label: 'How old a reading may be (minutes)',
         type: 'number',
@@ -967,7 +978,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'the station ever sees a reading, and a tighter setting silences the weather on a station that is working.',
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: WEATHER_SOURCE_KEYS.inTalk,
         label: 'Let the presenter mention the weather between records',
         type: 'boolean',
@@ -980,7 +991,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'clock asks for and which reports the reading properly.',
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: WEATHER_BREAK_KEYS.templates,
         label: 'How the station gives the weather',
         type: 'text',
@@ -991,7 +1002,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             "to carry {{weather.report}} outside its [[optional]] parts and after a full stop. Empty restores the station's own.",
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: ALMANAC_SOURCE_KEYS.inTalk,
         label: 'Let the presenter mention the date between records',
         type: 'boolean',
@@ -1004,7 +1015,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             'ABOUT the date, which a band asks for and which reads an entry out properly.',
     },
     {
-        group: 'rotation',
+        group: 'phrasings',
         key: ALMANAC_BREAK_KEYS.templates,
         label: 'How the station reads the date out',
         type: 'text',
@@ -1015,7 +1026,7 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
             "line has to carry {{almanac.report}} outside its [[optional]] parts and after a full stop. Empty restores the station's own.",
     },
     {
-        group: 'rotation',
+        group: 'bulletins',
         key: ALMANAC_KEYS.lean,
         label: 'What the station picks out of the day',
         type: 'select',
@@ -1037,19 +1048,6 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
         type: 'boolean',
         default: DEFAULT_RULES.crossfade,
         help: "How long each blend lasts is measured from both records rather than set here, so a record that ends cold is barely ridden and one that fades is ridden as far as the next record can absorb it. An album or a sequenced setlist ignores this and stays cold by default, because its gaps are somebody else's decision.",
-    },
-    {
-        group: 'rotation',
-        key: TEMPLATE_KEYS.templates,
-        label: 'What the station says',
-        type: 'text',
-        default: DEFAULT_TEMPLATES.join('\n'),
-        dependsOn: ROTATION_KEYS.breaks,
-        help:
-            'One phrasing per line, picked between so the station does not repeat itself. ' +
-            `Fill in a record with ${TEMPLATE_VOCABULARY.map(name => `{{${name}}}`).join(', ')}, ` +
-            'and wrap a part in [[double brackets]] to have it dropped when there is nothing to put in it. ' +
-            "A line starting with # is off without being lost. Empty restores the station's own; to stop it talking, turn breaks off above.",
     },
 
     // ── playout ────────────────────────────────────────────────────────────────
