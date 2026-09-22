@@ -47,9 +47,13 @@ import {
     LATITUDE_INSTRUCTIONS,
     LATITUDE_LICENCE,
     LATITUDE_MAX_WORDS,
+    TRIVIA_INSTRUCTIONS,
+    TRIVIA_MAX_WORDS,
+    triviaOf,
     type CharacterContext,
     type CharacterFault,
     type PersonaLatitude,
+    type PersonaTrivia,
     type PersonaSheet,
 } from '#modules/personas/persona.sheet.js';
 import type { PersonaNotesForPrompt } from '#modules/personas/persona.note.js';
@@ -258,6 +262,17 @@ export interface BreakPromptShape {
      */
     allowsLatitude?: boolean;
     /**
+     * Whether a persona's {@link PersonaSheet.trivia} is offered on this kind of break.
+     *
+     * The ordinary link alone, and the reason is {@link BreakPromptShape.showsFacts}' own: a kind of
+     * break that is about something other than the record (a bulletin, a forecast, a greeting to
+     * somebody who has just arrived) is where a presenter handed four notes finds a way to read them
+     * out. The shape vetoes and the sheet only offers, as with latitude, and the job asks the same
+     * question before it widens the read, so a veto here withholds the extra facts as well as the
+     * words about them.
+     */
+    allowsTrivia?: boolean;
+    /**
      * The {@link BreakPromptShape.rules} to send INSTEAD when latitude is in force.
      *
      * Swapped rather than appended, and that is the whole reason this exists as a second list. "Make
@@ -271,6 +286,21 @@ export interface BreakPromptShape {
      * whatever room the character was given.
      */
     latitudeRules?: readonly string[];
+    /**
+     * The {@link BreakPromptShape.rules} to send INSTEAD when trivia is in force, and over
+     * {@link BreakPromptShape.latitudeRules} when both are.
+     *
+     * {@link BreakPromptShape.latitudeRules}' argument exactly, and it was found the same way: by
+     * reading a keen presenter's prompt back. The sheet it was built for tells the story first and
+     * names the record last, and the ordinary rules said "name a record, and then say what you make of
+     * it", which is the same slot with the order reversed. So the shape owns a third version, and the
+     * rule a kind cannot give up is in it too: a listener still has to be able to tell which record the
+     * story was about, and {@link BreakPromptShape.mustNameRecord} still refuses a break that never says.
+     *
+     * It wins over the latitude set because its first rule is written to hold under both rungs: one
+     * story, told as far as it goes, is the one point and the thought taken all the way at once.
+     */
+    triviaRules?: readonly string[];
     /**
      * Whether a performance cue may be written into this kind of break.
      *
@@ -403,6 +433,9 @@ export const TALK_BREAK_SHAPE: BreakPromptShape = {
     almanac: 'offered',
     // The link between two records is the one kind with room to give. See `allowsLatitude`.
     allowsLatitude: true,
+    // And the one kind whose job is the record, so the one place a presenter keen on the story behind
+    // it gets to tell it. See `allowsTrivia`.
+    allowsTrivia: true,
     // The same three rules with the first one turned around, which is the only one of them that was
     // ever about restraint. Rules two and three are unchanged and deliberately so: a character given
     // room still has to be talking ABOUT a record a listener can identify — `mustNameRecord` refuses
@@ -416,6 +449,18 @@ export const TALK_BREAK_SHAPE: BreakPromptShape = {
             'one too many.',
         'Talk, do not announce. Naming the record is not the break, it is what the break hangs on: a reaction, an opinion, something it ' +
             'reminded you of. If your break would still make sense read out by anybody else, it is not yours yet.',
+    ],
+    // The same three again for a presenter keen on the story behind the record, with the ORDER taken out
+    // of the second: the story comes first and the record lands at the end of it, which "name a record,
+    // and then say what you make of it" forbade in as many words. What is kept is what `mustNameRecord`
+    // refuses over, so it is still asked for plainly before anything is refused for missing it.
+    triviaRules: [
+        'Tell one story, and tell it all the way. A break is the story behind one record told well, not everything you were given about ' +
+            'both: pick the note worth telling and let the rest go.',
+        'Make the story about a record a listener can name. Say its title, or who it is by, somewhere in the break: at the start, or at ' +
+            'the end once the story has earned it. One of the two is plenty; both is usually one too many.',
+        'Talk, do not announce. Naming the record is not the break, and neither is reading out what the station knows: the break is the ' +
+            'story, told the way only you would tell it. If it would still make sense read out by anybody else, it is not yours yet.',
     ],
     // A link between two records is the presenter being a person, which is exactly what a cue is for.
     // See `allowsCues` for why the bulletin and the welcome are not.
@@ -583,6 +628,10 @@ const WORDS_PER_SECOND = 2.6;
 const latitudeIn = (settings: PromptSettings, shape: BreakPromptShape): PersonaLatitude | undefined =>
     shape.allowsLatitude === true ? latitudeOf(settings.persona) : undefined;
 
+/** {@link latitudeIn} for {@link PersonaSheet.trivia}, on the same terms. See {@link BreakPromptShape.allowsTrivia}. */
+const triviaIn = (settings: PromptSettings, shape: BreakPromptShape): PersonaTrivia | undefined =>
+    shape.allowsTrivia === true ? triviaOf(settings.persona) : undefined;
+
 /**
  * The reactions the PRESENTER may use, which is not the whole vocabulary any more.
  *
@@ -717,7 +766,10 @@ function padRules(settings: PromptSettings, shape: BreakPromptShape): string[] {
 export function maxWordsFor(settings: PromptSettings, shape: BreakPromptShape): number {
     const base = settings.maxWords ?? DEFAULT_MAX_WORDS;
     const latitude = latitudeIn(settings, shape);
-    return latitude === undefined ? base : Math.max(base, LATITUDE_MAX_WORDS[latitude]);
+    const trivia = triviaIn(settings, shape);
+    // Both rungs are floors under the station's own figure, and under each other: a keen presenter
+    // with `unleashed` has the larger of the two rather than whichever was read last.
+    return Math.max(base, latitude === undefined ? 0 : LATITUDE_MAX_WORDS[latitude], trivia === undefined ? 0 : TRIVIA_MAX_WORDS[trivia]);
 }
 
 /**
@@ -750,6 +802,7 @@ function systemPrompt(settings: PromptSettings, shape: BreakPromptShape): string
     const maxWords = maxWordsFor(settings, shape);
     const seconds = Math.round(maxWords / WORDS_PER_SECOND);
     const latitude = latitudeIn(settings, shape);
+    const trivia = triviaIn(settings, shape);
 
     // A persona replaces the role sentence rather than being appended to it, because "you are the
     // voice of a radio station" and "you are a pirate captain who runs one" are the same slot said
@@ -782,6 +835,11 @@ function systemPrompt(settings: PromptSettings, shape: BreakPromptShape): string
         // word ceiling rather than among the facets of a voice. This is that instruction pointed the
         // other way.
         ...(latitude === undefined ? [] : [LATITUDE_INSTRUCTIONS[latitude]]),
+        // Beside the latitude line and for its reason: this is what the extra room is FOR. It sits in
+        // the system turn whether or not these two records carry any notes, because it is who the
+        // presenter is rather than something about this moment; the user turn's notes paragraph is
+        // what changes with the records.
+        ...(trivia === undefined ? [] : [TRIVIA_INSTRUCTIONS[trivia]]),
         shape.job,
         '',
         'Rules:',
@@ -851,7 +909,12 @@ function systemPrompt(settings: PromptSettings, shape: BreakPromptShape): string
               : []),
         // Last in the list, because a rule true of this kind alone should not push the shared ones
         // further from the end than they already are.
-        ...(latitude === undefined ? (shape.rules ?? []) : (shape.latitudeRules ?? shape.rules ?? [])).map(rule => `- ${rule}`),
+        ...(trivia !== undefined && shape.triviaRules !== undefined
+            ? shape.triviaRules
+            : latitude === undefined
+              ? (shape.rules ?? [])
+              : (shape.latitudeRules ?? shape.rules ?? [])
+        ).map(rule => `- ${rule}`),
     ];
 
     // AFTER the rules, and that position is the whole reason it exists. The failure it addresses is
@@ -949,10 +1012,22 @@ function userPrompt(request: BreakWriteRequest, settings: PromptSettings, shape:
         // model that spends a third of a 28-word break on a fact it was shown has spent it on the
         // one part of the break no listener needed and the character could not survive.
         parts.push(
-            'The notes are things the station knows to be true, offered in case one is worth saying. ' +
-                'You do not have to use any of them, and most breaks are better without one: a note earns its place only if you can ' +
-                'say it as yourself. Never more than one, never read out as it stands, never a date or a credit for its own sake. ' +
-                'Anything a note mentions that is not one of the records above is background, never something to cue or play.',
+            // SWAPPED under the trivia rung rather than appended to, because the two paragraphs say
+            // opposite things about the same list: this one that most breaks are better without a
+            // note, that one that the notes are the break. A model handed both hedges into neither,
+            // which is the failure the rung exists to fix. What the two share is kept word for word:
+            // never read out as it stands, and anything a note mentions that is not one of the
+            // records is background.
+            triviaIn(settings, shape) === undefined
+                ? 'The notes are things the station knows to be true, offered in case one is worth saying. ' +
+                      'You do not have to use any of them, and most breaks are better without one: a note earns its place only if you can ' +
+                      'say it as yourself. Never more than one, never read out as it stands, never a date or a credit for its own sake. ' +
+                      'Anything a note mentions that is not one of the records above is background, never something to cue or play.'
+                : 'The notes are things the station knows to be true, and they are what your break is made of. Pick the one that tells ' +
+                      'the best story about a record, or two if they tell the same story, and tell it as yourself: who made it, where it ' +
+                      'came from, what happened to it. Never read a note out as it stands. A year, a name or a chart position is worth ' +
+                      'saying when it is part of the story, and only exactly as the note gives it. Anything a note mentions that is not one ' +
+                      'of the records above is background, never something to cue or play.',
         );
     }
 
