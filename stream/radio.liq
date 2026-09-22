@@ -77,6 +77,14 @@ settings.log.file.set(true)
 settings.log.file.append.set(true)
 settings.log.file.path.set(environment.get("LOG_FILE", default="/streamlogs/liquidsoap.log"))
 
+# The source-leak warning fires at 50 sources by default, and this file builds 50 to 52 of them
+# with nothing leaking: a live station held that count flat from 2026-09-09 to 2026-09-22. Every
+# warning also dumps the whole source list, about 40 lines, and it fired about 1,300 times in those
+# two weeks, so most of the log was that dump. 100 is well clear of the real graph and still low
+# enough to catch an actual leak, which is a count that keeps climbing (a loop minting a source
+# per track) rather than one sitting just over a threshold.
+settings.clock.leak_warning := 100
+
 # The image runs as root so the bundled helpers can write their logs. Liquidsoap's init refuses
 # root by default; allow it for this local/personal container.
 settings.init.allow_root := true
@@ -243,12 +251,12 @@ def bed_label(m) =
   list.append(title, station_art)
 end
 
-music = map_metadata(bed_label, insert_missing=true, music)
+music = metadata.map(bed_label, insert_missing=true, music)
 
 # The floor UNDER the programme: a bundled station ident/bed. Always available, so a gap inside
 # a programme deadair is driving never becomes dead air, and the voice always has something to
 # duck. It is not a floor under the station itself — the lease gate below is above all of this.
-station_id = map_metadata(bed_label, insert_missing=true, mksafe(single("/radio/station-id.mp3")))
+station_id = metadata.map(bed_label, insert_missing=true, mksafe(single("/radio/station-id.mp3")))
 
 # 2) The music bed: a request.queue the APP pushes into (POST /control/push below), one item at a
 # time. Empty queue → the source is unavailable, so the enclosing fallback drops to the local
@@ -1334,8 +1342,8 @@ radio = fallback(track_sensitive=false, [switch(track_sensitive=false, [({drivin
 #
 # So the transition into silence is announced explicitly. `insert_metadata` puts a packet into the
 # stream at the current position rather than at a boundary, which is the only way to label a
-# source that has none.
-radio = insert_metadata(radio)
+# source that has none. It is a method `fallback` already carries, so `radio` needs no wrapping;
+# the `insert_metadata(radio)` operator that used to sit here is deprecated and did the same.
 
 # Deliberately seeded as if the station had been driving, so the FIRST tick after startup labels
 # a freshly started mount with the station name instead of leaving it blank until something airs.
