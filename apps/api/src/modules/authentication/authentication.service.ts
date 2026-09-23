@@ -31,8 +31,7 @@ import {
     OidcAuthenticationLoginStart,
     OidcAuthenticationRequest,
     OidcLoginCallback,
-    OidcLoginStart,
-    OidcLoginStartResponse,
+    OidcProviderSummary,
     PasswordAuthenticationRequest,
     RefreshTokenAuthenticationRequest,
     StepUpStartRequest,
@@ -43,7 +42,14 @@ import { Injectable } from 'injectkit';
 import { parseAndValidate, parseAndValidateArray } from '@maroonedsoftware/zod';
 import { AuthenticationServiceOptions } from './authentication.options.js';
 import { ActorsRepository } from '#modules/authentication/repositories/actors.repository.js';
+import { PermissionsService } from '#modules/permissions/permissions.service.js';
+import { PLATFORM_NAMESPACE, PLATFORM_OBJECT_ID } from '#modules/permissions/platform.roles.js';
+import { AppConfig } from '@maroonedsoftware/appconfig';
+import { OidcSignInRefused } from './oidc.sign.in.refused.js';
+import { allowlistAdmits, resolveSigninAllowlist, resolveSigninProviders } from './signin.settings.js';
+import { safeRedirectPath } from './redirect.after.js';
 import {
+    AuthenticationSession,
     AuthenticationSessionFactor,
     AuthenticationSessionService,
     AuthenticatorFactorService,
@@ -143,6 +149,8 @@ export class AuthenticationService {
         private readonly oidcFactorService: OidcFactorService,
         private readonly requestCookieJar: RequestCookieJar,
         private readonly responseCookieJar: ResponseCookieJar,
+        private readonly permissionsService: PermissionsService,
+        private readonly config: AppConfig,
     ) {
         this.authenticateHandlerMap = new Map<AuthenticationGrantType, AuthenticationHandlers>();
         this.authenticateHandlerMap.set('client_credentials', {
@@ -506,8 +514,7 @@ export class AuthenticationService {
         // dead token.
         const presentedByCookie = bodyToken === undefined;
         try {
-            await this.revokeIfSubjectIsGone(refreshToken);
-            const token = await this.sessionService.refreshSession(refreshToken);
+            const token = await this.sessionService.refreshSession(refreshToken, undefined, session => this.refuseIfSubjectIsGone(session));
             return {
                 result: 'token',
                 accessToken: token.accessToken,
@@ -540,16 +547,14 @@ export class AuthenticationService {
      * answers 403, and the audit hook fails its foreign key on the way past. Revoke the session
      * instead, and let the 401 route the client to a real login.
      *
-     * The lookup is read-only (no jti consumption, no rotation), so a token this rejects is left
-     * exactly as `refreshSession` would have found it. Anything the lookup itself refuses is not
-     * this method's verdict to render: fall through and let the refresh grant judge it, so replay
-     * detection and family revocation stay in one place.
+     * Runs as `refreshSession`'s guard: after the token has been verified and its `jti` claimed, and
+     * before anything is minted, so replay detection and family revocation stay in the session
+     * service and this sees only a session that grant has already accepted. It used to peek the
+     * token first with `lookupSessionFromJwt`, which since @maroonedsoftware/authentication 6
+     * refuses a refresh token outright; the peek would have failed on every call, been swallowed,
+     * and silently stopped checking anything.
      */
-    private async revokeIfSubjectIsGone(refreshToken: string): Promise<void> {
-        const lookup = await this.sessionService.lookupSessionFromJwt(refreshToken, true).catch(() => undefined);
-        if (!lookup) return;
-
-        const { session } = lookup;
+    private async refuseIfSubjectIsGone(session: AuthenticationSession): Promise<void> {
         if (await this.actorsRepository.existsActive(session.subject)) return;
 
         await this.sessionService.deleteSession(session.sessionToken, 'expiry');
@@ -841,9 +846,11 @@ export class AuthenticationService {
     }
 
     private async handleOidcStartLogin(request: OidcAuthenticationLoginStart): Promise<AuthenticationLoginStartResponse> {
+        const redirectAfter = safeRedirectPath(request.redirect_after);
         const { url, state, expiresAt } = await this.oidcFactorService.beginAuthorization({
             provider: request.provider,
             intent: 'sign-in',
+            ...(redirectAfter === undefined ? {} : { redirectAfter }),
         });
 
         return await parseAndValidate(
@@ -964,34 +971,42 @@ export class AuthenticationService {
         };
     }
 
-    async startOidcLogin(request: OidcLoginStart): Promise<OidcLoginStartResponse> {
-        const { url, state, expiresAt } = await this.oidcFactorService.beginAuthorization({
-            provider: request.provider,
-            intent: 'sign-in',
-            redirectAfter: request.redirect_after,
-        });
-
-        return await parseAndValidate(
-            {
-                authorize_url: url.toString(),
-                state,
-                expires_at: expiresAt,
-            },
-            OidcLoginStartResponse,
-        );
+    /**
+     * The identity providers the sign-in page offers, by name and button, in the operator's order.
+     *
+     * Read from the same list and through the same resolver the registry's source uses, so a row
+     * the station cannot sign in through is not offered as a button either. Secrets are never read
+     * here: a button needs a name and a label.
+     */
+    async listOidcProviders(): Promise<OidcProviderSummary[]> {
+        return resolveSigninProviders(this.config, () => '').map(provider => ({ name: provider.name, label: provider.label }));
     }
 
-    // Returns the redirect HTML plus the resolved `actorId` (when the callback
-    // succeeded) so the route can run post-auth side effects — notably the
-    // OIDC-avatar capture — without `AuthenticationService` importing identity
-    // services (which would form an import cycle via ReferrersService).
+    /**
+     * Where an identity provider sends the browser back to. Completes the authorization, resolves
+     * it to an account, and answers an HTML page that hands the console a one-time exchange id.
+     *
+     * An identity already linked to an account, or one the library auto-linked because the provider
+     * vouched for an address an account already holds, signs in as that account. Anything else is a
+     * NEW account, which {@link provisionOidcNewUser} creates only for an address the allowlist
+     * names. Every refusal lands the browser on the console's callback page with a code and a
+     * sentence, never on raw JSON from the API, and never with an exception's own message in the URL.
+     */
     async handleOidcCallback(query: OidcLoginCallback): Promise<string> {
         try {
             const result = await this.oidcFactorService.completeAuthorization({ params: query });
 
+            // A link started from Security by somebody already signed in: the identity is now on
+            // their account, and there is nothing to sign in. Back to Security, which says so.
+            if (result.intent === 'link') {
+                const linked = new URL(`${this.options.spaBaseUrl}/settings/security`);
+                linked.searchParams.set('linked', result.profile.provider);
+                return this.htmlRedirectProvider.getRedirectHtml(linked).html;
+            }
+
             const identity =
                 result.kind === 'new-user'
-                    ? await this.provisionOidcNewUser(result.authorizationId, result.profile)
+                    ? await this.provisionOidcNewUser(result.authorizationId, result.profile, result.emailConflict !== undefined)
                     : { actorId: result.actorId, factorId: result.factorId, isNewUser: false };
 
             const exchangeId = await this.oidcFactorService.stashAuthenticatedExchange({
@@ -1000,59 +1015,71 @@ export class AuthenticationService {
                 isNewUser: identity.isNewUser,
             });
 
-            const target = new URL(result.redirectAfter ?? `${this.options.spaBaseUrl}/auth/callback`);
+            const target = new URL(`${this.options.spaBaseUrl}/auth/callback`);
             target.searchParams.set('token', `oidc:${exchangeId}`);
+            // A path, checked again here although it was checked when the sign-in began, because the
+            // state that carried it came back through somebody else's server.
+            const redirect = safeRedirectPath(result.redirectAfter);
+            if (redirect !== undefined) target.searchParams.set('redirect', redirect);
             if (identity.isNewUser) target.searchParams.set('is_new_user', 'true');
 
-            const { html } = this.htmlRedirectProvider.getRedirectHtml(target);
-
-            // Capture the IdP avatar (e.g. Google's `picture`) for an already-existing
-            // person — covers account-linking and returning-user sign-in, where the
-            // person predates the picture. New users have no person yet (no-op); their
-            // avatar is captured at onboarding in `createPerson`. Done here (not in
-            // AuthenticationService) to avoid an identity↔authentication import cycle;
-            // best-effort so it never blocks the sign-in redirect.
-            // if (identity.actorId) {
-            //     try {
-            //         await this.actorsRepository.ensureOidcAvatar(identity.actorId);
-            //     } catch {
-            //         /* avatar capture is best-effort */
-            //     }
-            // }
-
-            return html;
+            return this.htmlRedirectProvider.getRedirectHtml(target).html;
         } catch (err) {
-            const code = query.error ?? (err instanceof Error ? err.message : 'oidc_failed');
+            const refusal = err instanceof OidcSignInRefused ? err : isLinkTaken(err) ? new OidcSignInRefused('already_linked') : undefined;
+            const code = refusal?.code ?? (query.error ? 'provider_error' : 'oidc_failed');
             await this.sessionActivity.recordFactorFailure({
                 identifier: query.state ?? code,
                 factorType: 'oidc',
-                lastReason: code,
+                lastReason: query.error ?? (err instanceof Error ? err.message : code),
             });
             // We don't know the SPA's redirect_after here — the state record may already be gone
             // (expired/missing) or never existed (IdP rejected before we could read it). Fall back
-            // to the configured SPA base URL so the user lands on the demo's callback page with
+            // to the configured SPA base URL so the user lands on the console's callback page with
             // an actionable error rather than raw 4xx JSON on the API host.
+            // Only a link can find the identity taken, and the person linking is signed in: they
+            // go back to Security rather than to a sign-in page telling them they are not.
+            if (refusal?.code === 'already_linked') {
+                const security = new URL(`${this.options.spaBaseUrl}/settings/security`);
+                security.searchParams.set('link_error', refusal.code);
+                return this.htmlRedirectProvider.getRedirectHtml(security).html;
+            }
             const target = new URL(`${this.options.spaBaseUrl}/auth/callback`);
             target.searchParams.set('error', code);
-            if (query.error_description) target.searchParams.set('error_description', query.error_description);
-            const { html } = this.htmlRedirectProvider.getRedirectHtml(target);
-            return html;
+            const description =
+                refusal?.description ?? query.error_description ?? 'Could not finish signing you in through that provider. Try again.';
+            target.searchParams.set('error_description', description);
+            return this.htmlRedirectProvider.getRedirectHtml(target).html;
         }
     }
 
+    /**
+     * An account for somebody signing in through a provider for the first time, if they may have one.
+     *
+     * Two refusals come first, before anything is written. `emailConflict` means an account with
+     * this address exists but the provider does not call the address verified: creating a second
+     * account would shadow the first, and linking to it would hand it over on the provider's word
+     * alone. Then the allowlist (`signin.allowlist`), checked against the address only when the
+     * provider vouches for it, since an unverified address is whatever the person typed there.
+     *
+     * An admitted identity gets an account holding the `listener` role and nothing more: it can
+     * hear the station and read the console, and an administrator decides the rest. Its verified
+     * address becomes an email factor too, so a later auto-link or emailed sign-in finds it.
+     */
     private async provisionOidcNewUser(
         authorizationId: string,
         profile: { email?: string; emailVerified?: boolean },
+        emailConflict: boolean,
     ): Promise<{ actorId: string; factorId: string; isNewUser: true }> {
+        if (emailConflict) throw new OidcSignInRefused('email_unverified');
+
+        const verifiedEmail = profile.emailVerified === true ? profile.email : undefined;
+        if (!allowlistAdmits(resolveSigninAllowlist(this.config), verifiedEmail)) throw new OidcSignInRefused('not_allowed');
+
         const actor = await this.actorsRepository.create('user');
 
-        // The IdP already verified the email; we mirror that into our email-factor table so
-        // future flows that look up by email (auto-link, magic link) can find this account.
-        // We skip if the IdP didn't return a verified email — better to leave the user
-        // OIDC-only than to claim ownership of an unverified address.
-        if (profile.email && profile.emailVerified) {
+        if (verifiedEmail) {
             try {
-                await this.emailFactorRepository.createFactor(actor.id, profile.email);
+                await this.emailFactorRepository.createFactor(actor.id, verifiedEmail);
             } catch {
                 // Unique-constraint collision: another account already owns this email.
                 // The package's auto-link path should have caught this; if we still got
@@ -1063,6 +1090,29 @@ export class AuthenticationService {
         }
 
         const factor = await this.oidcFactorService.createFactorFromAuthorization(actor.id, authorizationId);
+
+        // The one role a newcomer gets. `createdBy` is the new account itself, as onboarding's grant
+        // is: nobody signed in performed it.
+        await this.permissionsService.writeDirect(
+            [
+                {
+                    object: { namespace: PLATFORM_NAMESPACE, id: PLATFORM_OBJECT_ID },
+                    relation: 'listener',
+                    subject: { kind: 'concrete', namespace: 'user', id: actor.id },
+                },
+            ],
+            actor.id,
+        );
+
         return { actorId: actor.id, factorId: factor.id, isNewUser: true };
     }
+}
+
+/**
+ * The library's answer to linking an identity that already belongs to another account: a 409 whose
+ * details name the provider. Told apart from this file's own 409 (an email factor collision) by
+ * those details.
+ */
+function isLinkTaken(error: unknown): boolean {
+    return IsHttpError(error) && error.statusCode === 409 && typeof error.details?.['provider'] === 'string';
 }

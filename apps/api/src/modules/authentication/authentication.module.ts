@@ -34,9 +34,8 @@ import {
     OidcFactorRepository,
     OidcFactorService,
     OidcFactorServiceOptions,
-    OidcProviderConfig,
     OidcProviderRegistry,
-    OidcProviderRegistryConfig,
+    OidcProviderSource,
     OtpProvider,
     OtpProviderMock,
     PasswordFactorRepository,
@@ -54,7 +53,8 @@ import { AppConfig } from '@maroonedsoftware/appconfig';
 import { Logger } from '@maroonedsoftware/logger';
 import { RateLimiterRedis } from 'rate-limiter-flexible';
 import { Redis } from 'ioredis';
-import { ServerKitModule } from '@maroonedsoftware/koa';
+import { ServerKitContext, ServerKitModule } from '@maroonedsoftware/koa';
+import { OAuthOptions } from '#modules/oauth/oauth.options.js';
 import { DeadairPasswordFactorRepository } from './repositories/password.factor.repository.js';
 import { AuthenticationService } from './authentication.service.js';
 import { AuthenticationServiceOptions } from './authentication.options.js';
@@ -70,6 +70,8 @@ import { DeadairFidoFactorRepository } from './repositories/fido.factor.reposito
 import { DeadairAuthenticatorFactorRepository } from './repositories/authenticator.factor.repository.js';
 import { DeadairOidcFactorRepository } from './repositories/oidc.factor.repository.js';
 import { DeadairOidcActorEmailLookup } from './oidc.actor.email.lookup.js';
+import { SettingsOidcProviderSource } from './settings.oidc.provider.source.js';
+import { seedSigninProvidersFromEnv } from './signin.seed.js';
 import { CacheProvider } from '@maroonedsoftware/cache';
 import { DeadairPhoneFactorRepository } from './repositories/phone.factor.repository.js';
 import { ActorsRepository } from './repositories/actors.repository.js';
@@ -97,8 +99,9 @@ export function totpIssuer(config: AppConfig): string {
 }
 
 /**
- * Where Google sends the browser back to after sign-in, and so the address an operator registers
- * with Google as the redirect URI.
+ * Where an identity provider sends the browser back to after sign-in, and so the address an
+ * operator registers with it as the redirect URI. One address for every provider: the state the
+ * station hands out with each sign-in says which provider it was.
  *
  * `APP_BASE_URL` is the station's ORIGIN, the address a browser reaches the console on, and every
  * edge in front of the API (the image's nginx, both compose edges, Vite's proxy) passes it only
@@ -155,7 +158,16 @@ export const AuthenticationModule: ServerKitModule = {
 
         registry.register(JwtAuthenticationIssuerMap).useMap(JwtAuthenticationIssuerMap).set('deadair', DeadairJwtAuthenticationIssuer);
 
-        registry.register(DeadairJwtAuthenticationIssuer).useClass(DeadairJwtAuthenticationIssuer).asScoped();
+        // A factory rather than a class, because the OAuth addresses are absent on a station with no
+        // public address and constructor injection cannot say "maybe". The issuer uses them to ask
+        // for the MCP resource's audience on the MCP endpoint and the station's own everywhere else.
+        const oauth = OAuthOptions.fromConfig(config);
+        registry
+            .register(DeadairJwtAuthenticationIssuer)
+            .useFactory(
+                container => new DeadairJwtAuthenticationIssuer(container.get(AuthenticationSessionService), container.get(ServerKitContext), oauth),
+            )
+            .asScoped();
 
         // Checked here rather than in the scoped factory below, for `CryptoModule`'s reason: an
         // unset key is `''`, which signs nothing and fails at whichever request first tries to mint
@@ -291,32 +303,14 @@ export const AuthenticationModule: ServerKitModule = {
         registry.register(MfaChallengeService).useClass(MfaChallengeService).asScoped();
         registry.register(MfaOrchestrator).useClass(MfaOrchestrator).asScoped();
 
+        // The identity providers come from the console (`signin.providers`), read on every lookup so
+        // a row added or changed there applies to the next sign-in. The registry asks for an
+        // `OidcProviderSource` since @maroonedsoftware/authentication 6; this is the one it gets. The
+        // Google variables that used to build the only provider here are copied into that list once,
+        // at start, by `seedSigninProvidersFromEnv`.
         registry
-            .register(OidcProviderRegistryConfig)
-            .useFactory(() => {
-                const providers: OidcProviderConfig[] = [];
-                const googleClientId = config.get('GOOGLE_OIDC_CLIENT_ID', '');
-                const googleClientSecret = config.get('GOOGLE_OIDC_CLIENT_SECRET', '');
-                if (googleClientId && googleClientSecret) {
-                    // GOOGLE_OIDC_ISSUER lets local dev point this provider at a mock IdP
-                    // (e.g. http://localhost:3080/google via docker/mock-oidc) without
-                    // adding a separate provider name. Unset in production → real Google.
-                    const googleIssuer = config.get('GOOGLE_OIDC_ISSUER', 'https://accounts.google.com');
-                    const googleIssuerUrl = new URL(googleIssuer);
-                    providers.push({
-                        name: 'google',
-                        issuer: googleIssuerUrl,
-                        clientId: googleClientId,
-                        clientSecret: googleClientSecret,
-                        scopes: ['openid', 'email', 'profile'],
-                        redirectUri: oidcRedirectUri(config),
-                        // Only opt into insecure discovery when the issuer is explicitly http —
-                        // i.e. the dev-only mock IdP. Real Google stays https-only.
-                        allowInsecureIssuer: googleIssuerUrl.protocol === 'http:',
-                    });
-                }
-                return new OidcProviderRegistryConfig(providers);
-            })
+            .register(OidcProviderSource)
+            .useFactory(container => new SettingsOidcProviderSource(container.get(AppConfig), container, container.get(Logger), oidcRedirectUri))
             .asSingleton();
         registry.register(OidcProviderRegistry).useClass(OidcProviderRegistry).asSingleton();
         registry.register(OidcFactorRepository).useClass(DeadairOidcFactorRepository).asScoped();
@@ -338,6 +332,7 @@ export const AuthenticationModule: ServerKitModule = {
         registry.register(RequestCookieJar).useClass(RequestCookieJar).asScoped();
     },
     start: async container => {
+        await seedSigninProvidersFromEnv(container);
         if (otpDevBypassEnabled) {
             container.get(Logger).warn('OTP_DEV_BYPASS is enabled — any submitted OTP code will be accepted. Do NOT enable in production.');
         }

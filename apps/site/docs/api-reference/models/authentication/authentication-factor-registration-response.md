@@ -1,6 +1,6 @@
 ---
 title: 'AuthenticationFactorRegistrationResponse'
-sidebar_position: 76
+sidebar_position: 79
 mdx:
     format: 'md'
 ---
@@ -11,5 +11,6 @@ type AuthenticationFactorRegistrationResponse =
     | PasswordFactorRegistrationResponse
     | EmailFactorRegistrationResponse
     | AuthenticatorFactorRegistrationResponse
-    | FidoFactorRegistrationResponse;
+    | FidoFactorRegistrationResponse
+    | OidcFactorRegistrationResponse;
 ```

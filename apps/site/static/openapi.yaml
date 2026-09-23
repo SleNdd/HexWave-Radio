@@ -323,6 +323,21 @@ paths:
                         'application/json':
                             schema:
                                 '$ref': '#/components/schemas/AuthenticationLoginStartResponse'
+    '/auth/login/oidc/providers':
+        get:
+            operationId: listOidcProviders
+            summary: 'List sign-in providers'
+            description: 'The identity providers the sign-in page offers beside a password, in the order the operator listed them. Empty when none is set up'
+            security: []
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                type: array
+                                items:
+                                    '$ref': '#/components/schemas/OidcProviderSummary'
     '/auth/factors':
         get:
             operationId: listFactors
@@ -414,7 +429,7 @@ paths:
         delete:
             operationId: removeFactor
             summary: 'Remove factor'
-            description: "Remove one of the caller's own factors. Answered only for `authenticator` today, and only after a recent strong-factor verification: the same gate enrolment sits behind once a strong factor exists, so a stolen session cannot quietly switch the second factor off. Removing the last authenticator turns the sign-in challenge off for that account."
+            description: "Remove one of the caller's own factors. Answered for `authenticator` and `oidc`, and only after a recent strong-factor verification: the same gate enrolment sits behind once a strong factor exists, so a stolen session cannot quietly switch the second factor off. Removing the last authenticator turns the sign-in challenge off for that account. A linked identity provider that is the account's only way to sign in is refused with 409."
             parameters:
                 - name: method
                   in: path
@@ -1314,6 +1329,131 @@ paths:
                         'application/json':
                             schema:
                                 '$ref': '#/components/schemas/NowPlaying'
+    '/auth/oauth/authorize/context':
+        post:
+            operationId: describe
+            summary: 'Describe authorization request'
+            description: "Validate an app's authorization request for the consent page, and stash it for the signed-in person. A POST because it stashes: what is approved is exactly what was validated here"
+            requestBody:
+                required: true
+                content:
+                    'application/json':
+                        schema:
+                            '$ref': '#/components/schemas/OAuthAuthorizationQuery'
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthAuthorizationContextResult'
+    '/auth/oauth/authorize/approve':
+        post:
+            operationId: approve
+            summary: 'Approve authorization request'
+            description: 'Let the app act as the signed-in person. Once the account has a strong second factor, this needs one verified in the last five minutes'
+            requestBody:
+                required: true
+                content:
+                    'application/json':
+                        schema:
+                            '$ref': '#/components/schemas/OAuthAuthorizationDecision'
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthAuthorizationOutcome'
+    '/auth/oauth/authorize/deny':
+        post:
+            operationId: deny
+            summary: 'Deny authorization request'
+            description: 'Turn the app away. It is told the person said no'
+            requestBody:
+                required: true
+                content:
+                    'application/json':
+                        schema:
+                            '$ref': '#/components/schemas/OAuthAuthorizationDecision'
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthAuthorizationOutcome'
+    '/auth/oauth/clients':
+        get:
+            operationId: list
+            summary: 'List OAuth clients'
+            description: 'Every app registered with the station, by an operator or by itself'
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthClientList'
+        post:
+            operationId: create
+            summary: 'Create OAuth client'
+            description: 'Register an app by hand. The secret, for an app that keeps one, is in this response and nowhere else'
+            requestBody:
+                required: true
+                content:
+                    'application/json':
+                        schema:
+                            '$ref': '#/components/schemas/OAuthClientCreate'
+            responses:
+                '201':
+                    description: Created
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthClientIssued'
+    '/auth/oauth/clients/{clientId}':
+        delete:
+            operationId: revoke
+            summary: 'Revoke OAuth client'
+            description: "Withdraw an app. Every person's approval of it ends, and so does every token it holds"
+            parameters:
+                - name: clientId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                      maxLength: 200
+            responses:
+                '204':
+                    description: 'No content'
+    '/auth/oauth/grants':
+        get:
+            operationId: list
+            summary: 'List OAuth grants'
+            description: 'The apps the signed-in person has let act as them'
+            responses:
+                '200':
+                    description: 'Successful response'
+                    content:
+                        'application/json':
+                            schema:
+                                '$ref': '#/components/schemas/OAuthGrantList'
+    '/auth/oauth/grants/{id}':
+        delete:
+            operationId: revoke
+            summary: 'Revoke OAuth grant'
+            description: 'Disconnect an app. Every token it holds for this person stops working at once'
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                      format: uuid
+            responses:
+                '204':
+                    description: 'No content'
     '/onboarding':
         get:
             operationId: getOnboardingRequirements
@@ -4405,8 +4545,9 @@ components:
             description: 'The kind of the factor'
         OidcProvider:
             type: string
-            enum: [google]
-            description: 'The OIDC identity provider'
+            minLength: 1
+            maxLength: 32
+            description: 'The name of an identity provider the station offers, as the operator set it under Settings, Sign-in and connections. `GET /auth/login/oidc/providers` lists them'
         BaseAuthenticationRequest:
             type: object
             properties:
@@ -4858,6 +4999,10 @@ components:
                       provider:
                           '$ref': '#/components/schemas/OidcProvider'
                           description: 'The IdP to authorize against'
+                      redirect_after:
+                          type: string
+                          maxLength: 2048
+                          description: 'A path on the console to return to once signed in, such as `/settings/security`. Anything that is not a same-origin path is ignored and the console opens at its home page'
                   required: [grant_type, provider]
         AuthenticationLoginStart:
             oneOf:
@@ -5040,6 +5185,17 @@ components:
                     type: string
                     description: 'The label for the factor'
             required: [method, kind, methodId]
+        OidcProviderSummary:
+            type: object
+            properties:
+                name:
+                    '$ref': '#/components/schemas/OidcProvider'
+                    description: 'What to start a sign-in with'
+                label:
+                    type: string
+                    description: 'What its button says'
+            required: [name, label]
+            description: 'An identity provider the sign-in page can offer'
         FactorChallengePhoneStart:
             type: object
             properties:
@@ -5339,6 +5495,17 @@ components:
                     type: string
                     description: 'The label for the FIDO factor'
             required: [method]
+        OidcFactorRegistration:
+            type: object
+            properties:
+                method:
+                    const: oidc
+                    description: 'The method of the factor'
+                provider:
+                    '$ref': '#/components/schemas/OidcProvider'
+                    description: 'The provider to link, as `GET /auth/login/oidc/providers` names it'
+            required: [method, provider]
+            description: "Link an identity provider to the signed-in account. Answered with the provider's address; the browser goes there and comes back to Security"
         AuthenticationFactorRegistration:
             oneOf:
                 - '$ref': '#/components/schemas/PhoneFactorRegistration'
@@ -5346,6 +5513,7 @@ components:
                 - '$ref': '#/components/schemas/EmailFactorRegistration'
                 - '$ref': '#/components/schemas/AuthenticatorFactorRegistration'
                 - '$ref': '#/components/schemas/FidoFactorRegistration'
+                - '$ref': '#/components/schemas/OidcFactorRegistration'
             discriminator:
                 propertyName: method
                 mapping:
@@ -5354,6 +5522,7 @@ components:
                     email: '#/components/schemas/EmailFactorRegistration'
                     authenticator: '#/components/schemas/AuthenticatorFactorRegistration'
                     fido: '#/components/schemas/FidoFactorRegistration'
+                    oidc: '#/components/schemas/OidcFactorRegistration'
         PhoneFactorRegistrationResponse:
             type: object
             properties:
@@ -5501,6 +5670,20 @@ components:
                     '$ref': '#/components/schemas/FidoFactorAttestation'
                     description: 'The FIDO factor attestation information'
             required: [method, registrationId, expiresAt, issuedAt, attestation]
+        OidcFactorRegistrationResponse:
+            type: object
+            properties:
+                method:
+                    const: oidc
+                    description: 'The method of the factor'
+                authorizeUrl:
+                    type: string
+                    description: 'Where to send the browser. The provider sends it back to Security, with `?linked=<provider>` on success'
+                expiresAt:
+                    type: string
+                    format: date-time
+                    description: 'When the link attempt expires if the provider has not answered'
+            required: [method, authorizeUrl, expiresAt]
         AuthenticationFactorRegistrationResponse:
             oneOf:
                 - '$ref': '#/components/schemas/PhoneFactorRegistrationResponse'
@@ -5508,6 +5691,7 @@ components:
                 - '$ref': '#/components/schemas/EmailFactorRegistrationResponse'
                 - '$ref': '#/components/schemas/AuthenticatorFactorRegistrationResponse'
                 - '$ref': '#/components/schemas/FidoFactorRegistrationResponse'
+                - '$ref': '#/components/schemas/OidcFactorRegistrationResponse'
             discriminator:
                 propertyName: method
                 mapping:
@@ -5516,6 +5700,7 @@ components:
                     email: '#/components/schemas/EmailFactorRegistrationResponse'
                     authenticator: '#/components/schemas/AuthenticatorFactorRegistrationResponse'
                     fido: '#/components/schemas/FidoFactorRegistrationResponse'
+                    oidc: '#/components/schemas/OidcFactorRegistrationResponse'
         PhoneFactorRegistrationVerification:
             type: object
             properties:
@@ -7306,6 +7491,239 @@ components:
                     '$ref': '#/components/schemas/NowPlayingTrack'
             required: [station, onAir, listeners, mounts]
             description: 'What the station is playing, for anything that wants to display it'
+        OAuthAuthorizationQuery:
+            type: object
+            properties:
+                query:
+                    type: string
+                    maxLength: 8192
+                    description: 'The query string the app sent the browser to the consent page with, as `window.location.search` holds it'
+            required: [query]
+            description: "An app's authorization request, as the consent page received it"
+        OAuthClientKind:
+            type: string
+            enum: [preregistered, dynamic, metadata_document]
+            description: 'How the station knows an app: registered by an operator, registered by itself, or described by a document on its own website'
+        OAuthAuthorizationContext:
+            type: object
+            properties:
+                kind:
+                    const: context
+                    description: Discriminator
+                requestId:
+                    type: string
+                    maxLength: 200
+                    description: 'What approving or denying names. Good for a few minutes, and only for the person it was shown to'
+                clientId:
+                    type: string
+                    description: "The app's client id"
+                clientKind:
+                    '$ref': '#/components/schemas/OAuthClientKind'
+                    description: 'How the station knows the app'
+                clientName:
+                    type: string
+                    description: 'What the app calls itself'
+                clientUri:
+                    type: string
+                    description: "The app's own website, when it gave one"
+                logoUri:
+                    type: string
+                    description: "The app's logo, when it gave one"
+                redirectHost:
+                    type: string
+                    description: 'The host the browser is sent back to, which is who actually receives the approval'
+                loopbackOnly:
+                    type: boolean
+                    description: "Whether every address the app registered is this computer's own, which only an app running on it should use"
+                scope:
+                    type: array
+                    items:
+                        type: string
+                    description: 'What the app asked for. It acts as the person approving it whatever this says'
+                resource:
+                    type: string
+                    description: "What the app will be able to reach: the station's MCP endpoint"
+            required:
+                - kind
+                - requestId
+                - clientId
+                - clientKind
+                - redirectHost
+                - loopbackOnly
+                - scope
+                - resource
+            description: 'A valid request, stashed for the signed-in person to approve or deny'
+        OAuthAuthorizationRedirect:
+            type: object
+            properties:
+                kind:
+                    const: redirect
+                    description: Discriminator
+                redirectUrl:
+                    type: string
+                    description: 'Where to send the browser'
+            required: [kind, redirectUrl]
+            description: 'A request with something wrong that the app should be told about: send the browser back to it'
+        OAuthAuthorizationRefusal:
+            type: object
+            properties:
+                kind:
+                    const: refuse
+                    description: Discriminator
+                error:
+                    type: string
+                    description: 'The OAuth error code'
+                description:
+                    type: string
+                    description: 'What was wrong, in words'
+            required: [kind, error, description]
+            description: 'A request that names no app the station knows, or an address the app did not register. Never sent anywhere'
+        OAuthAuthorizationContextResult:
+            oneOf:
+                - '$ref': '#/components/schemas/OAuthAuthorizationContext'
+                - '$ref': '#/components/schemas/OAuthAuthorizationRedirect'
+                - '$ref': '#/components/schemas/OAuthAuthorizationRefusal'
+            discriminator:
+                propertyName: kind
+                mapping:
+                    context: '#/components/schemas/OAuthAuthorizationContext'
+                    redirect: '#/components/schemas/OAuthAuthorizationRedirect'
+                    refuse: '#/components/schemas/OAuthAuthorizationRefusal'
+        OAuthAuthorizationDecision:
+            type: object
+            properties:
+                requestId:
+                    type: string
+                    maxLength: 200
+                    description: 'From the context'
+            required: [requestId]
+            description: 'Approving or denying a stashed request'
+        OAuthAuthorizationOutcome:
+            type: object
+            properties:
+                redirectUrl:
+                    type: string
+                    description: "The app's own address, carrying the code or the refusal"
+            required: [redirectUrl]
+            description: 'Where to send the browser now'
+        OAuthClientAuthMethod:
+            type: string
+            enum: [none, client_secret_post, client_secret_basic]
+            description: "How the app proves itself at the token endpoint. `none` is a public client, which is what apps on somebody's own device are"
+        OAuthClientSummary:
+            type: object
+            properties:
+                clientId:
+                    type: string
+                    description: 'Its client id'
+                kind:
+                    type: string
+                    enum: [preregistered, dynamic]
+                    description: 'Created by an operator, or registered by itself'
+                name:
+                    type: string
+                    description: 'What it is called'
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                    description: 'Where it may be sent back to'
+                tokenEndpointAuthMethod:
+                    '$ref': '#/components/schemas/OAuthClientAuthMethod'
+                    description: 'How it proves itself'
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: 'When it was registered'
+                lastUsedAt:
+                    type: string
+                    format: date-time
+                    description: 'When it last obtained a token'
+                expiresAt:
+                    type: string
+                    format: date-time
+                    description: 'When a self-registered app lapses unless used again'
+            required: [clientId, kind, redirectUris, tokenEndpointAuthMethod, createdAt]
+            description: 'An app registered with the station'
+        OAuthClientList:
+            type: object
+            properties:
+                clients:
+                    type: array
+                    items:
+                        '$ref': '#/components/schemas/OAuthClientSummary'
+                    description: 'Newest first. Apps that describe themselves are not listed: nothing is stored for them'
+            required: [clients]
+        OAuthClientCreate:
+            type: object
+            properties:
+                name:
+                    type: string
+                    minLength: 1
+                    maxLength: 100
+                    description: 'What to call it'
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                        maxLength: 2048
+                    description: "Where it may be sent back to. At least one; https, or this computer's own address"
+                tokenEndpointAuthMethod:
+                    '$ref': '#/components/schemas/OAuthClientAuthMethod'
+                    description: "`none` for an app on somebody's own device, otherwise a secret it keeps"
+            required: [name, redirectUris, tokenEndpointAuthMethod]
+            description: 'An app an operator registers by hand, for a client that cannot register itself'
+        OAuthClientIssued:
+            type: object
+            properties:
+                client:
+                    '$ref': '#/components/schemas/OAuthClientSummary'
+                    description: 'The app as it will appear in the list'
+                clientSecret:
+                    type: string
+                    description: 'Present for an app that keeps a secret. Store it now: nothing can show it again'
+            required: [client]
+            description: 'A registered app, with its secret. The only time the secret is ever returned'
+        OAuthGrant:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: 'For disconnecting it'
+                clientId:
+                    type: string
+                    description: "The app's client id"
+                clientName:
+                    type: string
+                    description: 'What the app calls itself, when the station can still find out'
+                resource:
+                    type: string
+                    description: 'What it can reach'
+                scope:
+                    type: array
+                    items:
+                        type: string
+                    description: 'What it asked for'
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: 'When it was first approved'
+                lastUsedAt:
+                    type: string
+                    format: date-time
+                    description: 'When it last obtained a token'
+            required: [id, clientId, resource, scope, createdAt]
+            description: 'An app the signed-in person has let act as them'
+        OAuthGrantList:
+            type: object
+            properties:
+                grants:
+                    type: array
+                    items:
+                        '$ref': '#/components/schemas/OAuthGrant'
+                    description: 'Most recent first'
+            required: [grants]
         OnboardingRequirementKey:
             type: string
             enum: [admin.account]
@@ -10619,6 +11037,7 @@ components:
                 - stream
                 - housekeeping
                 - mail
+                - signin
                 - rotation
                 - breaks
                 - bulletins

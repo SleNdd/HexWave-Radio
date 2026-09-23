@@ -16,6 +16,17 @@ export const queryKeys = {
         factors: () => ['auth', 'factors'] as const,
         /** The signed-in account's API keys. Issuing, rotating or revoking one answers in terms of the whole list again. */
         apikeys: () => ['auth', 'apikeys'] as const,
+        /** The identity providers the sign-in page offers. Public: asked before anybody is signed in. */
+        providers: () => ['auth', 'providers'] as const,
+    },
+    /** The station as an OAuth authorization server: a pending approval, and the apps it knows. */
+    oauth: {
+        /** One app's authorization request, keyed on the query string it arrived with. */
+        authorization: (query: string) => ['oauth', 'authorization', query] as const,
+        /** The apps registered with the station. Registering or withdrawing one answers in terms of the whole list. */
+        clients: () => ['oauth', 'clients'] as const,
+        /** The apps the signed-in person has let act as them. */
+        grants: () => ['oauth', 'grants'] as const,
     },
     onboarding: {
         requirements: () => ['onboarding', 'requirements'] as const,

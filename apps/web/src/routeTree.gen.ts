@@ -25,6 +25,7 @@ import { Route as TracesRouteImport } from './routes/traces'
 import { Route as VoiceRouteImport } from './routes/voice'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as CatalogIndexRouteImport } from './routes/catalog/index'
+import { Route as OauthAuthorizeRouteImport } from './routes/oauth/authorize'
 import { Route as PlaylistsIndexRouteImport } from './routes/playlists/index'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
@@ -42,6 +43,7 @@ import { Route as SettingsProvidersRouteImport } from './routes/settings/provide
 import { Route as SettingsRenderRouteImport } from './routes/settings/render'
 import { Route as SettingsRotationRouteImport } from './routes/settings/rotation'
 import { Route as SettingsSecurityRouteImport } from './routes/settings/security'
+import { Route as SettingsSigninRouteImport } from './routes/settings/signin'
 import { Route as SettingsStationRouteImport } from './routes/settings/station'
 import { Route as SettingsStorageRouteImport } from './routes/settings/storage'
 import { Route as SettingsStreamRouteImport } from './routes/settings/stream'
@@ -133,6 +135,11 @@ const CatalogIndexRoute = CatalogIndexRouteImport.update({
   path: '/catalog/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
+  id: '/oauth/authorize',
+  path: '/oauth/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlaylistsIndexRoute = PlaylistsIndexRouteImport.update({
   id: '/playlists/',
   path: '/playlists/',
@@ -218,6 +225,11 @@ const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
   path: '/settings/security',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsSigninRoute = SettingsSigninRouteImport.update({
+  id: '/settings/signin',
+  path: '/settings/signin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsStationRoute = SettingsStationRouteImport.update({
   id: '/settings/station',
   path: '/settings/station',
@@ -286,6 +298,7 @@ export interface FileRoutesByFullPath {
   '/traces': typeof TracesRoute
   '/voice': typeof VoiceRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
@@ -300,6 +313,7 @@ export interface FileRoutesByFullPath {
   '/settings/render': typeof SettingsRenderRoute
   '/settings/rotation': typeof SettingsRotationRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/signin': typeof SettingsSigninRoute
   '/settings/station': typeof SettingsStationRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/stream': typeof SettingsStreamRoute
@@ -331,6 +345,7 @@ export interface FileRoutesByTo {
   '/traces': typeof TracesRoute
   '/voice': typeof VoiceRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
@@ -345,6 +360,7 @@ export interface FileRoutesByTo {
   '/settings/render': typeof SettingsRenderRoute
   '/settings/rotation': typeof SettingsRotationRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/signin': typeof SettingsSigninRoute
   '/settings/station': typeof SettingsStationRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/stream': typeof SettingsStreamRoute
@@ -377,6 +393,7 @@ export interface FileRoutesById {
   '/traces': typeof TracesRoute
   '/voice': typeof VoiceRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
   '/settings/analysis': typeof SettingsAnalysisRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/artwork': typeof SettingsArtworkRoute
@@ -391,6 +408,7 @@ export interface FileRoutesById {
   '/settings/render': typeof SettingsRenderRoute
   '/settings/rotation': typeof SettingsRotationRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/signin': typeof SettingsSigninRoute
   '/settings/station': typeof SettingsStationRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/stream': typeof SettingsStreamRoute
@@ -424,6 +442,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/voice'
     | '/auth/callback'
+    | '/oauth/authorize'
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
@@ -438,6 +457,7 @@ export interface FileRouteTypes {
     | '/settings/render'
     | '/settings/rotation'
     | '/settings/security'
+    | '/settings/signin'
     | '/settings/station'
     | '/settings/storage'
     | '/settings/stream'
@@ -469,6 +489,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/voice'
     | '/auth/callback'
+    | '/oauth/authorize'
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
@@ -483,6 +504,7 @@ export interface FileRouteTypes {
     | '/settings/render'
     | '/settings/rotation'
     | '/settings/security'
+    | '/settings/signin'
     | '/settings/station'
     | '/settings/storage'
     | '/settings/stream'
@@ -514,6 +536,7 @@ export interface FileRouteTypes {
     | '/traces'
     | '/voice'
     | '/auth/callback'
+    | '/oauth/authorize'
     | '/settings/analysis'
     | '/settings/appearance'
     | '/settings/artwork'
@@ -528,6 +551,7 @@ export interface FileRouteTypes {
     | '/settings/render'
     | '/settings/rotation'
     | '/settings/security'
+    | '/settings/signin'
     | '/settings/station'
     | '/settings/storage'
     | '/settings/stream'
@@ -560,6 +584,7 @@ export interface RootRouteChildren {
   TracesRoute: typeof TracesRoute
   VoiceRoute: typeof VoiceRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   SettingsAnalysisRoute: typeof SettingsAnalysisRoute
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsArtworkRoute: typeof SettingsArtworkRoute
@@ -574,6 +599,7 @@ export interface RootRouteChildren {
   SettingsRenderRoute: typeof SettingsRenderRoute
   SettingsRotationRoute: typeof SettingsRotationRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
+  SettingsSigninRoute: typeof SettingsSigninRoute
   SettingsStationRoute: typeof SettingsStationRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
   SettingsStreamRoute: typeof SettingsStreamRoute
@@ -704,6 +730,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CatalogIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/authorize': {
+      id: '/oauth/authorize'
+      path: '/oauth/authorize'
+      fullPath: '/oauth/authorize'
+      preLoaderRoute: typeof OauthAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/playlists/': {
       id: '/playlists/'
       path: '/playlists'
@@ -823,6 +856,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSecurityRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/signin': {
+      id: '/settings/signin'
+      path: '/settings/signin'
+      fullPath: '/settings/signin'
+      preLoaderRoute: typeof SettingsSigninRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/station': {
       id: '/settings/station'
       path: '/settings/station'
@@ -912,6 +952,7 @@ const rootRouteChildren: RootRouteChildren = {
   TracesRoute: TracesRoute,
   VoiceRoute: VoiceRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  OauthAuthorizeRoute: OauthAuthorizeRoute,
   SettingsAnalysisRoute: SettingsAnalysisRoute,
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsArtworkRoute: SettingsArtworkRoute,
@@ -926,6 +967,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRenderRoute: SettingsRenderRoute,
   SettingsRotationRoute: SettingsRotationRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
+  SettingsSigninRoute: SettingsSigninRoute,
   SettingsStationRoute: SettingsStationRoute,
   SettingsStorageRoute: SettingsStorageRoute,
   SettingsStreamRoute: SettingsStreamRoute,

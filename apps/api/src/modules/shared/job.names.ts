@@ -22,6 +22,7 @@ export type JobNames =
     | 'render.prune_script_history'
     | 'storage.sweep_orphans'
     | 'activity.prune_events'
+    | 'oauth.expire_clients'
     | 'station.check_releases'
     | 'scrobble.flush'
     | 'podcasts.refresh'

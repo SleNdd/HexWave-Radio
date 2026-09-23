@@ -105,7 +105,7 @@ Registered first, in this order, and the order is load-bearing — see the comme
 | **Health**          | [modules/health](src/modules/health)                 | Liveness, and the first module that registers anything. It depends on nothing, so a probe asking whether the process is up while everything below is still starting gets the true answer rather than a 404 that reads as a wrong URL. |
 | **Data**            | [modules/data](src/modules/data)                     | The Kysely/Postgres pool and the Redis client. When `DATABASE_APP_USER` is set the runtime pool connects as the non-owner `app_user` role, which holds DML grants only and cannot alter the schema; dbmate and pg-boss keep their own owner connections via `DATABASE_USER`. The role is `nobypassrls` and there are no RLS policies for it not to bypass — see [row-level-security](https://github.com/robert-dean/deadair/discussions/31). Pool size and acquire/idle timeouts are tunable (`DATABASE_POOL_*`) because each request holds a connection for its whole lifetime. Also the generated DB types (`db.ts`) and the shared `DataRepository` base. |
 | **Crypto**          | [modules/crypto](src/modules/crypto)                 | The `EncryptionProvider`, keyed from `KMS_LOCAL_ROOT_KEY`. Registered before authentication so anything needing envelope encryption (auth factors, plugin credentials) resolves it without depending on auth's setup order. |
-| **Authentication**  | [modules/authentication](src/modules/authentication) | Wires `@maroonedsoftware/authentication`: the bearer scheme, whose chain tries a personal API key (`da_…`, ServerKit's `ApiKeyService` over `actors_apikey_factors`) before deadair's JWT issuer, factor services and Kysely repositories (password, email, phone, OIDC, FIDO, authenticator), MFA challenge and orchestration, Redis-backed rate limiting on password attempts, sessions and login-activity tracking, and the request/response cookie jars used by refresh-cookie flows. Google OIDC registers only when its client id and secret are configured. `OTP_DEV_BYPASS` accepts any submitted code and hard-fails at boot unless `NODE_ENV=development`. |
+| **Authentication**  | [modules/authentication](src/modules/authentication) | Wires `@maroonedsoftware/authentication`: the bearer scheme, whose chain tries a personal API key (`da_…`, ServerKit's `ApiKeyService` over `actors_apikey_factors`) before deadair's JWT issuer, factor services and Kysely repositories (password, email, phone, OIDC, FIDO, authenticator), MFA challenge and orchestration, Redis-backed rate limiting on password attempts, sessions and login-activity tracking, and the request/response cookie jars used by refresh-cookie flows. OIDC providers come from the `signin.providers` setting on every lookup (`SettingsOidcProviderSource`); the old `GOOGLE_OIDC_*` variables are copied into it once at start. `OTP_DEV_BYPASS` accepts any submitted code and hard-fails at boot unless `NODE_ENV=development`. |
 | **Permissions**     | [modules/permissions](src/modules/permissions)       | The Zanzibar-style tuple store and check path: `PermissionsService`, the Kysely `DeadairPermissionsTupleRepository`, the per-request `AuthorizationContext`, and `AccessControlService`. The authorization model in `generated/` is compiled from [data/permissions/core.perm](data/permissions/core.perm), including the `apikey` namespace that makes a key inherit its owner's platform permissions narrowed to its scope. `platform.roles.ts` holds the role → permission-pattern map that Zanzibar can't express per-object; its header documents the invariant that every role there must have a matching relation in the `.perm` file. |
 | **Policy**          | [modules/policy](src/modules/policy)                 | The concrete `PolicyService` and the policy registry map (`policy.mappings.ts`). `auth.session.mfa.required` is the package's default rule, which is what makes a sign-in stop at a challenge for an account with an authenticator enrolled; `auth.session.recent.factor` gates enrolling and removing factors once a strong one exists; `auth.session.mfa.satisfied` is deliberately always-allow, since nothing evaluates it. |
 
@@ -180,7 +180,9 @@ Never hand-edit a router.
 | Router                    | Paths |
 | ------------------------- | ----- |
 | `health`                  | `GET /health`, `GET /healthcheck` — the same answer under both spellings, anonymous and transaction-exempt, and internal, so no SDK method is generated |
-| `authentication`          | `POST /auth/token`, `/auth/login/start`, `/auth/login/verify`, `/auth/login/register`; internal browser landings at `GET /auth/login/oidc/callback` and `GET /auth/login/link/redirect`. Anonymous throughout by necessity |
+| `authentication`          | `POST /auth/token`, `/auth/login/start`, `/auth/login/verify`, `/auth/login/register`; `GET /auth/login/oidc/providers` for the sign-in page's buttons; internal browser landings at `GET /auth/login/oidc/callback` and `GET /auth/login/link/redirect`. Anonymous throughout by necessity |
+| `oauth.protocol` (hand-written) | `GET /.well-known/oauth-authorization-server`, `GET /.well-known/oauth-protected-resource[/api/mcp]` (at the origin, forwarded with the path kept), `POST /auth/oauth/register`, `POST /auth/oauth/token`. The OAuth RFC endpoints, not generated because their status codes and error bodies are the RFCs'. 404 throughout until `oauth.enabled` is on |
+| `oauth`                   | `POST /auth/oauth/authorize/context`, `/approve`, `/deny` for the console's consent page; `GET/POST /auth/oauth/clients`, `DELETE /auth/oauth/clients/{clientId}` (`platform.manage`); `GET /auth/oauth/grants`, `DELETE /auth/oauth/grants/{id}` for a person's connected apps |
 | `authentication.factor`   | `GET /auth/factors`, `POST /auth/factors/register`, `/auth/factors/verify`, `POST /auth/mfa/start`, `DELETE /auth/factors/:method/:methodId` (authenticator only, behind a recent strong factor). `POST /auth/factors/start` is the one route here with no session gate: it is authenticated by the short-lived `mfa_challenge_id` in the body |
 | `authentication.sessions` | `POST /auth/logout` — anonymous by design: signing out must always clear the httpOnly refresh cookie, including for a caller whose access token has already expired. `GET /auth/session` reports who the caller is and which platform roles they hold |
 | `authentication.apikeys`  | `GET /auth/apikeys`, `POST /auth/apikeys`, `POST /auth/apikeys/:id/rotate`, `DELETE /auth/apikeys/:id`: the signed-in account's own API keys. Issuing and rotating sit behind a recent strong factor; a request made with a key is refused here, so a key can never manage keys |
@@ -219,10 +221,19 @@ memory under both spellings (both are transaction-exempt for that reason).
 ### Server middleware
 
 Assembled in [setup.middleware.ts](src/server/setup.middleware.ts), in order: error handling,
-ServerKit context, Redis rate limiting (100 requests / 5s, with an in-memory `insuranceLimiter` so a
+the OAuth challenge at the MCP path, ServerKit context, Redis rate limiting (100 requests / 5s, with an in-memory `insuranceLimiter` so a
 Redis blip fails open rather than 429-ing the whole API), credentialed CORS against the explicit
-`SPA_BASE_URL` / `APP_BASE_URL` origins, authentication, audit context, authorization context, and
-the refresh-cookie hook.
+`SPA_BASE_URL` / `APP_BASE_URL` origins, the OAuth client credential, authentication, audit context,
+authorization context, and the refresh-cookie hook.
+
+Two of those exist for the station as an OAuth authorization server (see
+[docs/internals/authentication.md](../../docs/internals/authentication.md)).
+[oauth.challenge](src/server/middleware/oauth.challenge.middleware.ts) sits just inside error handling
+so it wraps everything: a 401 at the MCP path gains the RFC 9728 `resource_metadata` pointer an MCP
+client needs to find out how to get a token.
+[oauth.client.credential](src/server/middleware/oauth.client.credential.middleware.ts) sits just
+before authentication, which deletes `Authorization` from every request, and sets aside a client's
+HTTP Basic credential sent to the token endpoint.
 
 Three of those carry most of the weight:
 
@@ -255,7 +266,7 @@ Three of those carry most of the weight:
 
 [transaction.exemptions.ts](src/server/middleware/transaction.exemptions.ts) makes the opt-out set
 declarative: OPTIONS preflight, `/`, `/healthcheck`, streaming responses, cached cover art,
-now-playing, and the four routes whose holding time is set by a language model or a speech engine
+now-playing, the two OAuth discovery documents, and the four routes whose holding time is set by a language model or a speech engine
 rather than by the station (drafting a persona, rehearsing one, a voice sample, a speech preview).
 Its header documents the bar a new exemption has to clear: an exempt request has no transaction, so
 it must not enqueue a job describing work that could still fail, and must not rely on `AfterCommit`

@@ -1,6 +1,6 @@
 ---
 title: 'AuthenticatorFactorRegistrationResponse'
-sidebar_position: 73
+sidebar_position: 75
 mdx:
     format: 'md'
 ---

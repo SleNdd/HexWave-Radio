@@ -31,6 +31,9 @@ import { LogsRouter } from './logs.router.js';
 import { StreamRouter } from './stream.router.js';
 import { StorageRouter } from './storage.router.js';
 import { OnboardingRouter } from './onboarding.router.js';
+import { OAuthProtocolRouter } from './oauth.protocol.router.js';
+import { OauthRouter } from './oauth.router.js';
+import { McpRouter } from './mcp.router.js';
 
 export const routers = [
     HealthRouter,
@@ -38,6 +41,12 @@ export const routers = [
     AuthenticationFactorRouter,
     AuthenticationSessionsRouter,
     AuthenticationApikeysRouter,
+    // Hand-written rather than generated: its status codes and error bodies are the OAuth RFCs', which
+    // a generated route cannot produce. See the router.
+    OAuthProtocolRouter,
+    OauthRouter,
+    // Hand-written in the shape ContractKit's `mcp` output will emit; see the router.
+    McpRouter,
     // BEFORE `ArtRouter`, and that is load-bearing rather than alphabetical: `/art/breaks` also
     // matches `/art/{id}` and `/art/breaks/{kind}` matches `/art/{id}/{filename}`. Koa matches in
     // the order routers are registered, so with these the other way round every one of these
