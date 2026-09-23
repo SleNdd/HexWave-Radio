@@ -51,6 +51,21 @@ data class StationSettingsInput(
     val values: Map<String, JsonElement>,
 )
 
+/** One identity provider row, and whether its issuer answered as one */
+@Serializable
+data class SigninProviderCheck(
+    /** The row's name */
+    val name: String,
+    /** What its button says */
+    val label: String,
+    /** The issuer that was asked */
+    val issuer: String,
+    /** Whether the issuer answered with a discovery document naming itself */
+    val ok: Boolean,
+    /** Why not, in a sentence. Absent when it answered */
+    val problem: String? = null,
+)
+
 /**
  * A station setting as the console needs to render it. `ConfigFieldDescriptor` is the plugins area's,
  * and shared deliberately: a plugin's settings form and the station's are the same problem, and the
@@ -80,11 +95,22 @@ data class StationSettingDescriptor(
     val optionsFrom: ConfigFieldOptionSource? = null,
     /** `list` only, and ignored elsewhere */
     val columns: List<ConfigFieldColumn>? = null,
+    /** `list` only: rows the Add button offers to start from, beside an empty one */
+    val presets: List<ConfigFieldPreset>? = null,
     /** Key of the field this one is only relevant to */
     val dependsOn: String? = null,
     /** Key of the `number` field that is the upper end of the range this one opens, declared on the lower end only. Still two settings, each validated by name; the console draws them as one control whose handles cannot cross */
     val rangeWith: String? = null,
     val group: SettingGroup,
+)
+
+/** Every identity provider row the station could read, and the ones it could not use at all */
+@Serializable
+data class SigninProvidersCheck(
+    /** In the order the rows are listed */
+    val providers: List<SigninProviderCheck>,
+    /** One sentence per row the station drops before asking anybody: a missing cell, a name that is not a slug, an issuer that is not an address */
+    val unusable: List<String>,
 )
 
 /** Every station setting, with what it is currently worth */
@@ -95,6 +121,6 @@ data class StationSettings(
     val values: Map<String, JsonElement>,
     /** One entry per `secret` setting: whether a value is currently stored. Never the value itself */
     val configured: Map<String, Boolean>,
-    /** One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed */
+    /** One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. Also the sign-in redirect address, for the `note` that shows it, since a note holds no value of its own. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed */
     val derived: Map<String, String>,
 )

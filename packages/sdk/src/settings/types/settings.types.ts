@@ -32,6 +32,23 @@ export interface StationSettingsInput {
 }
 
 /**
+ * One identity provider row, and whether its issuer answered as one
+ * generated from [SigninProviderCheck](../../../../../apps/api/data/contracts/settings/settings.types.ck#L58)
+ */
+export interface SigninProviderCheck {
+    /** The row's name */
+    name: string;
+    /** What its button says */
+    label: string;
+    /** The issuer that was asked */
+    issuer: string;
+    /** Whether the issuer answered with a discovery document naming itself */
+    ok: boolean;
+    /** Why not, in a sentence. Absent when it answered */
+    problem?: string;
+}
+
+/**
  * A station setting as the console needs to render it. `ConfigFieldDescriptor` is the plugins area's,
  * and shared deliberately: a plugin's settings form and the station's are the same problem, and the
  * console renders both with one component
@@ -39,6 +56,17 @@ export interface StationSettingsInput {
  */
 export interface StationSettingDescriptor extends ConfigFieldDescriptor {
     group: SettingGroup;
+}
+
+/**
+ * Every identity provider row the station could read, and the ones it could not use at all
+ * generated from [SigninProvidersCheck](../../../../../apps/api/data/contracts/settings/settings.types.ck#L67)
+ */
+export interface SigninProvidersCheck {
+    /** In the order the rows are listed */
+    providers: SigninProviderCheck[];
+    /** One sentence per row the station drops before asking anybody: a missing cell, a name that is not a slug, an issuer that is not an address */
+    unusable: string[];
 }
 
 /**
@@ -51,6 +79,6 @@ export interface StationSettings {
     values: Record<string, unknown>;
     /** One entry per `secret` setting: whether a value is currently stored. Never the value itself */
     configured: Record<string, boolean>;
-    /** One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed */
+    /** One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. Also the sign-in redirect address, for the `note` that shows it, since a note holds no value of its own. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed */
     derived: Record<string, string>;
 }

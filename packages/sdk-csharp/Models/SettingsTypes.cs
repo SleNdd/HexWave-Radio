@@ -74,6 +74,31 @@ public sealed record StationSettingsInput
     public required Dictionary<string, JsonElement> Values { get; init; }
 }
 
+/// <summary>One identity provider row, and whether its issuer answered as one</summary>
+public sealed record SigninProviderCheck
+{
+    /// <summary>The row's name</summary>
+    [JsonPropertyName("name")]
+    public required string Name { get; init; }
+
+    /// <summary>What its button says</summary>
+    [JsonPropertyName("label")]
+    public required string Label { get; init; }
+
+    /// <summary>The issuer that was asked</summary>
+    [JsonPropertyName("issuer")]
+    public required string Issuer { get; init; }
+
+    /// <summary>Whether the issuer answered with a discovery document naming itself</summary>
+    [JsonPropertyName("ok")]
+    public required bool Ok { get; init; }
+
+    /// <summary>Why not, in a sentence. Absent when it answered</summary>
+    [JsonPropertyName("problem")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Problem { get; init; }
+}
+
 /// <summary>
 /// A station setting as the console needs to render it. `ConfigFieldDescriptor` is the plugins area's,
 /// and shared deliberately: a plugin's settings form and the station's are the same problem, and the
@@ -145,6 +170,11 @@ public sealed record StationSettingDescriptor
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ConfigFieldColumn>? Columns { get; init; }
 
+    /// <summary>`list` only: rows the Add button offers to start from, beside an empty one</summary>
+    [JsonPropertyName("presets")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ConfigFieldPreset>? Presets { get; init; }
+
     /// <summary>Key of the field this one is only relevant to</summary>
     [JsonPropertyName("dependsOn")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -157,6 +187,18 @@ public sealed record StationSettingDescriptor
 
     [JsonPropertyName("group")]
     public required SettingGroup Group { get; init; }
+}
+
+/// <summary>Every identity provider row the station could read, and the ones it could not use at all</summary>
+public sealed record SigninProvidersCheck
+{
+    /// <summary>In the order the rows are listed</summary>
+    [JsonPropertyName("providers")]
+    public required List<SigninProviderCheck> Providers { get; init; }
+
+    /// <summary>One sentence per row the station drops before asking anybody: a missing cell, a name that is not a slug, an issuer that is not an address</summary>
+    [JsonPropertyName("unusable")]
+    public required List<string> Unusable { get; init; }
 }
 
 /// <summary>Every station setting, with what it is currently worth</summary>
@@ -173,7 +215,7 @@ public sealed record StationSettings
     [JsonPropertyName("configured")]
     public required Dictionary<string, bool> Configured { get; init; }
 
-    /// <summary>One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed</summary>
+    /// <summary>One entry per setting whose EMPTY value is worked out rather than simply absent: the public URL from the address the station was deployed with, the advertised hostname from the public URL, the station's zone from this machine's. Also the sign-in redirect address, for the `note` that shows it, since a note holds no value of its own. What the station WOULD use with the box left empty, which is not the same as what is in force — the stored value is deliberately skipped, so a filled-in field still reports what clearing it would fall back to. A key is absent where its derivation lands on nothing. Values only: where each one comes from is in the field's own help text, which has said so since before this map existed</summary>
     [JsonPropertyName("derived")]
     public required Dictionary<string, string> Derived { get; init; }
 }
