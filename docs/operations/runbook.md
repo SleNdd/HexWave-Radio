@@ -45,8 +45,23 @@ These diagnostics do not change the overall HTTP status: a failed optional
 encoder must not restart an otherwise healthy Discord station. A growing
 packet age while the station is playing and unpaused is a live-output incident.
 
-For an audio-transport soak on the server, run
-`node scripts/monitor-live-stream.mjs 86400 var/log/live-stream-soak.jsonl`.
+For an audio-transport soak on the server, first confirm the existing radio is
+healthy, then start only the optional Compose `soak` service:
+`docker compose -f deploy/discord-radio/docker-compose.yml --profile soak up -d --no-deps --no-build live-monitor`.
+Set `RADIO_SOAK_RUN_ID` to a unique short identifier for each attempt so
+the log has a new name (for example `20260925-a`); the script also refuses
+to append to a nonempty existing log.
+On Windows, add the usual overlay Compose file. The sidecar shares the radio
+container's network namespace, but has no radio credentials or write access
+to its database; it writes only `var/log/live-stream-soak-<run-id>.jsonl`. Start it
+once, verify the `started` and `connected` records, and verify a `finished`
+record with `completed=true`, `interrupted=false`, `connected=true`, a positive
+byte count, elapsed time at least 86,400 seconds, and the container's exit code
+0 before accepting the duration.
+The output file must be new for each run. An
+abruptly missing process with no `finished` event is an invalid run. It emits
+a heartbeat once per minute so a stale observer is visible. For a short
+foreground check, `node scripts/monitor-live-stream.mjs 15 var/log/live-smoke.jsonl`.
 It records only timestamps, byte counts, stalls, reconnects and inter-packet
 gaps over one day; it never saves audio or the URL. An interval over one second
 is logged, and five seconds without MP3 bytes triggers a reconnect. Run it

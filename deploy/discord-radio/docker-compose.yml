@@ -39,6 +39,22 @@ services:
       start_period: 20s
     logging: *default-logging
 
+  live-monitor:
+    profiles: [soak]
+    image: node:26-alpine
+    init: true
+    restart: "no"
+    network_mode: service:radio
+    read_only: true
+    volumes:
+      - ../../scripts/monitor-live-stream.mjs:/monitor.mjs:ro
+      - ../../var/log:/logs
+    command: [node, /monitor.mjs, "86400", "/logs/live-stream-soak-${RADIO_SOAK_RUN_ID:-local}.jsonl", "1000"]
+    depends_on:
+      radio:
+        condition: service_healthy
+    logging: *default-logging
+
   ytaudio:
     build:
       context: ../..

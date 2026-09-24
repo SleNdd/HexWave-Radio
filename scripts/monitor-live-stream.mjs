@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -11,6 +11,9 @@ if (!Number.isSafeInteger(durationSeconds) || durationSeconds < 1 || durationSec
 }
 
 mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
+if (existsSync(outputPath) && statSync(outputPath).size > 0) {
+    throw new Error('Monitor log already has data; choose a fresh output path for a new run');
+}
 const record = (event, details = {}) => {
     appendFileSync(outputPath, `${JSON.stringify({ at: new Date().toISOString(), event, ...details })}\n`, { mode: 0o600 });
 };
@@ -21,6 +24,7 @@ let bytes = 0;
 let gaps = 0;
 let reconnects = 0;
 let stalls = 0;
+let connected = false;
 let maxGapMs = 0;
 let lastPacketAt = 0;
 let activeController;
@@ -29,6 +33,9 @@ const stop = () => { stopping = true; activeController?.abort(); };
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 record('live_monitor.started', { durationSeconds, gapThresholdMs });
+const heartbeat = setInterval(() => {
+    record('live_monitor.heartbeat', { elapsedSeconds: Math.round((Date.now() - startedAt) / 1000), bytes, gaps, reconnects, stalls });
+}, 60_000);
 
 while (!stopping && Date.now() < deadline) {
     const controller = new AbortController();
@@ -41,6 +48,7 @@ while (!stopping && Date.now() < deadline) {
         const response = await fetch('http://127.0.0.1:9380/live.mp3', { signal: controller.signal });
         clearTimeout(connectTimer);
         if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+        connected = true;
         record('live_monitor.connected');
         const connectedAt = Date.now();
         stallTimer = setInterval(() => {
@@ -82,6 +90,9 @@ while (!stopping && Date.now() < deadline) {
     }
 }
 
-record('live_monitor.finished', { elapsedSeconds: Math.round((Date.now() - startedAt) / 1000), bytes, gaps, reconnects, stalls, maxGapMs });
-console.log(JSON.stringify({ bytes, gaps, reconnects, stalls, maxGapMs, outputPath }));
-if (gaps || reconnects || stalls) process.exitCode = 1;
+clearInterval(heartbeat);
+const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+const completed = !stopping && Date.now() >= deadline;
+record('live_monitor.finished', { elapsedSeconds, completed, connected, bytes, gaps, reconnects, stalls, maxGapMs, interrupted: stopping });
+console.log(JSON.stringify({ completed, connected, bytes, gaps, reconnects, stalls, maxGapMs, outputPath }));
+if (!completed || !connected || bytes === 0 || gaps || reconnects || stalls) process.exitCode = 1;
