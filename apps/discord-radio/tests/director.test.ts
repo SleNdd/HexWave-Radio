@@ -583,6 +583,38 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it('uses the current reserve when playback consumes a song during slow plan staging', async () => {
+        const store = new RadioStore(':memory:', policy);
+        let now = 10_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        for (let index = 0; index < 3; index++) {
+            const id = store.enqueueEditorial({ ...found, id: `old-${index}`, artist: `Old Artist ${index}` });
+            expect(store.claimPreparation()?.id).toBe(id);
+            expect(store.markReady(id, `C:/cache/old-${index}.media`)).toBe(true);
+        }
+        const proposal = { theme: 'Обновлённый эфир', queries: [
+            'Test Unit — Night Circuit', 'Missing Artist — Lost Track', 'Another Artist — Missing',
+        ], requestRun: 'alternate' as const };
+        const planner = { proposeShowPlan: vi.fn(async () => proposal) };
+        const search = vi.fn(async (query: string) => query === proposal.queries[0] ? [found] : []);
+        const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider],
+            { materialize: async () => {
+                const playing = store.nextForPlayback()!;
+                now += 90_000;
+                store.finishItem(playing.id, now);
+                return 'C:/cache/new.media';
+            } } as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner });
+        (radio as unknown as { ensurePrepared: () => Promise<void> }).ensurePrepared = async () => undefined;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe('Обновлённый эфир'));
+        expect(search).toHaveBeenCalledTimes(1);
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-1', found.id]);
+        await radio.stop();
+        store.close();
+    });
+
     it('does not apply a show proposal made before a newly accepted listener signal', async () => {
         const store = new RadioStore(':memory:', policy);
         const deliveries: Array<(proposal: ShowPlanProposal) => void> = [];

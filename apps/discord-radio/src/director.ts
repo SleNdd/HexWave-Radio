@@ -826,11 +826,15 @@ export class RadioDirector {
                 const staged = this.providers.length > 0 ? await this.stageEditorialPlan(proposal, criticalReserve)
                     : { tracks: [] as Array<{ track: Track; localPath: string }>, release: () => undefined };
                 try {
-                    const minimum = criticalReserve ? 1 : 2;
-                    if (this.providers.length > 0 && staged.tracks.length < minimum) throw new Error(`Could not prepare ${minimum} new show-plan tracks`);
                     const applied = await this.mailbox.run(() => {
                         if (this.isStopped() || this.replanVersion !== signalVersion ||
                             this.store.currentHostShift()?.id !== snapshot.shiftId) return undefined;
+                        // Playback may have consumed the reserve while the model and
+                        // providers were working. Decide the minimum at commit time.
+                        const minimum = this.store.editorialPipelineCount() <= 2 ? 1 : 2;
+                        if (this.providers.length > 0 && staged.tracks.length < minimum) {
+                            throw new Error(`Could not prepare ${minimum} new show-plan tracks`);
+                        }
                         const next = this.providers.length > 0
                             ? this.store.applyEditorialPlan(snapshot.plan.revision, proposal, staged.tracks)
                             : this.store.replaceShowPlan(snapshot.plan.revision, proposal);
@@ -857,9 +861,10 @@ export class RadioDirector {
                 } finally {
                     staged.release();
                 }
-            }).catch(error => {
+            }).catch(async error => {
                 if (!this.workAbort.signal.aborted) {
-                    this.showPlanRetryAt = Date.now() + (criticalReserve ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000);
+                    const depth = await this.mailbox.run(() => this.store.editorialPipelineCount());
+                    this.showPlanRetryAt = Date.now() + (depth <= 2 ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000);
                     console.warn(JSON.stringify({ level: 'warn', event: 'show.plan.failed',
                         reason: error instanceof Error ? error.message : 'unknown' }));
                 }
@@ -923,7 +928,8 @@ export class RadioDirector {
                     // Try another verified catalog track. The old ready run remains audible.
                 }
             }
-            if (urgent && staged.length > 0) break;
+            if (staged.length > 0 && (urgent ||
+                await this.mailbox.run(() => this.store.editorialPipelineCount() <= 2))) break;
           }
           if (staged.length < (urgent ? 1 : 2) && !this.workAbort.signal.aborted) {
               console.warn(JSON.stringify({ level: 'warn', event: 'show.plan.staging.short', staged: staged.length,
