@@ -45,6 +45,10 @@ Only confirmed `played` rows feed its bounded recent-spin context. A determinist
 local plan may supply context when no current plan exists, but it never selects
 music. The active host proposes its own editorial searches through Tooken Club;
 fixed organizer Luna remains responsible for shifts and listener-input decisions.
+If the active host's planning model times out, returns an invalid plan, or has a
+temporary upstream failure, Luna may propose a replacement using that host's
+same personality and music brief. Authentication and rate-limit failures do not
+trigger a second call. This is model-authored continuity, not a fixed rotation.
 Without a valid model-authored plan the station reports degraded, rather than
 inserting random or fixed-genre music. New model proposals request eight to ten
 explicit `artist — title` searches; catalog results must match both metadata

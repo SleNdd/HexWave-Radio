@@ -11,7 +11,7 @@ const policy = {
     trackCooldownMs: 0, artistCooldownMs: 0,
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('showrunner', () => {
     it('has bounded mixed-language fallback seeds and rejects malformed plans', () => {
@@ -90,6 +90,42 @@ describe('showrunner', () => {
         expect(sent.model).toBe('grok-4.7');
         expect(sent.messages[0]?.content).toContain('Большинство предложений должно соответствовать твоему ядру');
         expect(sent.messages[0]?.content).toContain('обычно прозвучат лишь 3–4 трека');
+        store.close();
+    });
+
+    it('uses backstage Luna when a host model times out, preserving the host music brief', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const queries = Array.from({ length: 8 }, (_, index) => `Artist ${index} — Song ${index}`);
+        const fetchMock = vi.fn()
+            .mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: {
+                content: JSON.stringify({ theme: 'Индустриальная смена', queries, requestRun: 'alternate' }),
+            } }] }) });
+        vi.stubGlobal('fetch', fetchMock);
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', baseUrl: 'https://tooken.club/v1', apiFormat: 'chat',
+            model: 'gpt-6-luna', timeoutMs: 45_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const proposal = await writer.proposeShowPlan({ hostId: 'grok', hostMusicBrief: 'Industrial, metal, breakcore',
+            currentTheme: 'Старый блок', recentPlayed: [], upcoming: [] });
+        expect(proposal.theme).toBe('Индустриальная смена');
+        const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+        const bodies = calls.map(([, init]) => JSON.parse(String(init.body)) as {
+            model: string; messages: Array<{ content: string }>;
+        });
+        expect(bodies.map(body => body.model)).toEqual(['grok-4.7', 'gpt-6-luna']);
+        expect(bodies[1]?.messages[0]?.content).toContain('Industrial, experimental, metal, breakcore');
+        expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'show.plan.host_model_fallback', hostId: 'grok', reason: 'timeout' }));
+        store.close();
+    });
+
+    it('does not retry a shared authentication failure through Luna', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const fetchMock = vi.fn(async () => new Response('', { status: 401 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', baseUrl: 'https://tooken.club/v1', apiFormat: 'chat',
+            model: 'gpt-6-luna', timeoutMs: 45_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        await expect(writer.proposeShowPlan({ hostId: 'grok', recentPlayed: [] })).rejects.toThrow('AI API failed (401)');
+        expect(fetchMock).toHaveBeenCalledOnce();
         store.close();
     });
 
