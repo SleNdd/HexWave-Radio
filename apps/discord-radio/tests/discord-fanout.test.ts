@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { NoSubscriberBehavior, VoiceConnectionStatus, createAudioPlayer, entersState, joinVoiceChannel, type VoiceConnection } from '@discordjs/voice';
+import { AudioPlayerStatus, NoSubscriberBehavior, VoiceConnectionStatus, createAudioPlayer, createAudioResource, entersState, joinVoiceChannel, type VoiceConnection } from '@discordjs/voice';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DiscordOutputFanout } from '../src/discord-fanout.js';
 
 vi.mock('@discordjs/voice', async importOriginal => {
     const actual = await importOriginal<typeof import('@discordjs/voice')>();
-    return { ...actual, createAudioPlayer: vi.fn(actual.createAudioPlayer), joinVoiceChannel: vi.fn(), entersState: vi.fn() };
+    return { ...actual, createAudioPlayer: vi.fn(actual.createAudioPlayer), createAudioResource: vi.fn(actual.createAudioResource),
+        joinVoiceChannel: vi.fn(), entersState: vi.fn() };
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -23,6 +24,92 @@ function connection(status: VoiceConnectionStatus, channelId: string | null = nu
 }
 
 describe('DiscordOutputFanout shared programme', () => {
+    it('ends an audio resource stuck before its first frame without cutting one already playing', async () => {
+        vi.useFakeTimers();
+        const resource = { volume: { setVolume: vi.fn() } };
+        const player = Object.assign(new EventEmitter(), {
+            state: { status: AudioPlayerStatus.Idle } as { status: AudioPlayerStatus; resource?: typeof resource },
+            play(next: typeof resource) { this.state = { status: AudioPlayerStatus.Buffering, resource: next }; },
+            stop: vi.fn(function(this: { state: { status: AudioPlayerStatus }; emit: (event: string) => void }) {
+                if (this.state.status === AudioPlayerStatus.Idle) return false;
+                this.state = { status: AudioPlayerStatus.Idle };
+                this.emit(AudioPlayerStatus.Idle);
+                return true;
+            }),
+        });
+        vi.mocked(createAudioPlayer).mockReturnValueOnce(player as never);
+        vi.mocked(createAudioResource).mockReturnValue(resource as never);
+        const startLive = vi.fn();
+        const fanout = new DiscordOutputFanout(3, { start: startLive, stop: vi.fn(), close: vi.fn() } as never);
+        try {
+            const stuck = fanout.play('stuck.media');
+            expect(startLive).not.toHaveBeenCalled();
+            const rejected = expect(stuck).rejects.toThrow('Audio resource buffering timed out');
+            await vi.advanceTimersByTimeAsync(15_000);
+            await rejected;
+            expect(player.stop).toHaveBeenCalledTimes(1);
+            expect(startLive).not.toHaveBeenCalled();
+
+            const playing = fanout.play('playing.media');
+            player.state = { status: AudioPlayerStatus.Playing, resource };
+            player.emit(AudioPlayerStatus.Playing);
+            expect(startLive).toHaveBeenCalledOnce();
+            expect(startLive).toHaveBeenCalledWith('playing.media', 'music');
+            await vi.advanceTimersByTimeAsync(15_000);
+            expect(player.stop).toHaveBeenCalledTimes(1);
+            player.state = { status: AudioPlayerStatus.Idle };
+            player.emit(AudioPlayerStatus.Idle);
+            await expect(playing).resolves.toBeUndefined();
+        } finally {
+            fanout.stopAll();
+            vi.useRealTimers();
+        }
+    });
+
+    it('cleans the startup timer and listeners if the audio player rejects the resource synchronously', async () => {
+        vi.useFakeTimers();
+        const player = Object.assign(new EventEmitter(), {
+            state: { status: AudioPlayerStatus.Idle },
+            play: () => { throw new Error('resource already ended'); },
+            stop: vi.fn(() => false),
+        });
+        vi.mocked(createAudioPlayer).mockReturnValueOnce(player as never);
+        vi.mocked(createAudioResource).mockReturnValue({ volume: { setVolume: vi.fn() } } as never);
+        const fanout = new DiscordOutputFanout();
+        try {
+            await expect(fanout.play('ended.media')).rejects.toThrow('resource already ended');
+            expect(player.listenerCount(AudioPlayerStatus.Idle)).toBe(0);
+            expect(player.listenerCount('error')).toBe(0);
+            expect(vi.getTimerCount()).toBe(0);
+            expect((fanout as unknown as FanoutInternals).active).toBeUndefined();
+        } finally {
+            fanout.stopAll();
+            vi.useRealTimers();
+        }
+    });
+
+    it('starts HTTP audio when the player is already Playing on return from play', async () => {
+        const resource = { volume: { setVolume: vi.fn() } };
+        const player = Object.assign(new EventEmitter(), {
+            state: { status: AudioPlayerStatus.Idle } as { status: AudioPlayerStatus; resource?: typeof resource },
+            play(next: typeof resource) { this.state = { status: AudioPlayerStatus.Playing, resource: next }; },
+            stop: vi.fn(() => false),
+        });
+        vi.mocked(createAudioPlayer).mockReturnValueOnce(player as never);
+        vi.mocked(createAudioResource).mockReturnValue(resource as never);
+        const startLive = vi.fn();
+        const fanout = new DiscordOutputFanout(3, { start: startLive, stop: vi.fn(), close: vi.fn() } as never);
+        try {
+            const playing = fanout.play('instant.media');
+            expect(startLive).toHaveBeenCalledOnce();
+            player.state = { status: AudioPlayerStatus.Idle };
+            player.emit(AudioPlayerStatus.Idle);
+            await expect(playing).resolves.toBeUndefined();
+        } finally {
+            fanout.stopAll();
+        }
+    });
+
     it('does not mark or stop an already idle player as skipped', () => {
         const stopLive = vi.fn();
         const fanout = new DiscordOutputFanout(3, { stop: stopLive, close: vi.fn() } as never);

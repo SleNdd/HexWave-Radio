@@ -112,8 +112,27 @@ export class DiscordOutputFanout implements OutputFanout {
         resource.volume?.setVolume(options?.kind === 'speech' ? 1.1 : 0.38);
         await new Promise<void>((resolve, reject) => {
             this.active = { reject };
+            let bufferingTimedOut = false;
+            let liveStarted = false;
+            const startLive = (): void => {
+                if (liveStarted || this.player.state.status !== AudioPlayerStatus.Playing ||
+                    this.player.state.resource !== resource) return;
+                liveStarted = true;
+                this.liveStream?.start(localPath, options?.kind === 'speech' ? 'speech' : 'music');
+            };
+            // @discordjs/voice does not age out Buffering when FFmpeg never
+            // emits its first frame. Do not let one bad file freeze the wave.
+            const startupTimer = setTimeout(() => {
+                if (this.player.state.status !== AudioPlayerStatus.Buffering ||
+                    this.player.state.resource !== resource) return;
+                bufferingTimedOut = true;
+                this.player.stop(true);
+            }, 15_000);
+            startupTimer.unref();
             const cleanup = (): void => {
+                clearTimeout(startupTimer);
                 this.player.off(AudioPlayerStatus.Idle, idle);
+                this.player.off(AudioPlayerStatus.Playing, startLive);
                 this.player.off('error', failed);
                 this.active = undefined;
                 this.liveStream?.stop();
@@ -121,7 +140,8 @@ export class DiscordOutputFanout implements OutputFanout {
             const idle = (): void => {
                 const wasSkipped = this.skipped;
                 cleanup();
-                if (wasSkipped) reject(new Error('Playback skipped by owner'));
+                if (bufferingTimedOut) reject(new Error('Audio resource buffering timed out'));
+                else if (wasSkipped) reject(new Error('Playback skipped by owner'));
                 else resolve();
             };
             const failed = (error: Error): void => {
@@ -129,9 +149,15 @@ export class DiscordOutputFanout implements OutputFanout {
                 reject(error);
             };
             this.player.once(AudioPlayerStatus.Idle, idle);
+            this.player.on(AudioPlayerStatus.Playing, startLive);
             this.player.once('error', failed);
-            this.player.play(resource);
-            this.liveStream?.start(localPath, options?.kind === 'speech' ? 'speech' : 'music');
+            try {
+                this.player.play(resource);
+                startLive();
+            } catch (error) {
+                cleanup();
+                reject(error);
+            }
         });
     }
 
