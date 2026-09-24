@@ -17,6 +17,9 @@ describe('showrunner', () => {
     it('has bounded mixed-language fallback seeds and rejects malformed plans', () => {
         const plan = fallbackShowPlan(1_000_000, []);
         expect(validateShowProposal(plan)).toEqual(plan);
+        expect(() => validateShowProposal({ ...plan, theme: ' ' })).toThrow('invalid theme: short');
+        expect(() => validateShowProposal({ ...plan, theme: 'x'.repeat(101) })).toThrow('invalid theme: long');
+        expect(() => validateShowProposal({ ...plan, theme: 'https://example.test/music' })).toThrow('invalid theme: url');
         expect(plan.queries.some(query => /[А-ЯЁ]/iu.test(query))).toBe(true);
         expect(plan.queries.some(query => /[A-Z]/iu.test(query))).toBe(true);
         expect(() => validateShowProposal({ ...plan, queries: ['русский рок', 'русский рок', 'indie rock'] })).toThrow();

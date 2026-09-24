@@ -27,7 +27,9 @@ export function validateShowProposal(input: unknown): ShowPlanProposal {
     if (!input || typeof input !== 'object') throw new Error('Show plan is not an object');
     const proposal = input as Partial<ShowPlanProposal>;
     const theme = typeof proposal.theme === 'string' ? proposal.theme.trim() : '';
-    if (theme.length < 3 || theme.length > 100 || /\b(?:https?|ftp):\/\/|www\./iu.test(theme)) throw new Error('Show plan has an invalid theme');
+    if (theme.length < 3) throw new Error('Show plan has an invalid theme: short');
+    if (theme.length > 100) throw new Error('Show plan has an invalid theme: long');
+    if (/\b(?:https?|ftp):\/\/|www\./iu.test(theme)) throw new Error('Show plan has an invalid theme: url');
     if (!Array.isArray(proposal.queries) || proposal.queries.length < 3 || proposal.queries.length > 10) {
         throw new Error('Show plan must have 3-10 search queries');
     }
