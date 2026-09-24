@@ -30,6 +30,10 @@ the distinction between handed audio and confirmed playback.
   OpenAI's complimentary-token programme. No hosted web or container
   tools. Only moderated, bounded listener text is sent, with no secrets or
   private data.
+  The prompt asks for 1–3 sentences, but validation tolerates up to six clipped
+  sentences within the unchanged 420-character/70-word caps. This keeps a
+  concise multi-sentence character line from becoming a repetitive template;
+  all safety and unsupported-fact checks still apply to the complete aired text.
 - `SpeechEngine`: turn bounded text into an audio artifact. Wine/IVONA and Linux TTS are
   interchangeable adapters. The presenter refuses implausibly short audio bodies
   before caching them; FFmpeg validates and normalizes actual runtime speech.

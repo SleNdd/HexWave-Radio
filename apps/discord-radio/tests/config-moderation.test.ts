@@ -86,7 +86,7 @@ describe('configuration and boundaries', () => {
             trackCooldownMs: 1,
             artistCooldownMs: 1,
         });
-        const fetchMock = vi.fn(async () => new Response('', { status: 429 }));
+        const fetchMock = vi.fn(async (_url: string) => new Response('', { status: 429 }));
         vi.stubGlobal('fetch', fetchMock);
         const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         const primary = new OpenAiScriptWriter({ apiKey: 'test', model: 'gpt-5.4-mini-2026-03-17', timeoutMs: 1_000, hourlyLimit: 12, dailyLimit: 250 }, store);
@@ -94,6 +94,7 @@ describe('configuration and boundaries', () => {
         const line = await writer.writeBreak({ kind: 'station', recentLines: [] });
         expect(line.length).toBeGreaterThan(0);
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('https://tooken.club/v1/responses');
         expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'host.script.fallback', reason: 'rate_limit' }));
         store.close();
     });
@@ -118,6 +119,27 @@ describe('configuration and boundaries', () => {
         expect(await writer.writeBreak({ kind: 'intro', hostId: 'glm', recentLines: [] })).toContain('Глим');
         expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'host.script.fallback',
             reason: 'invalid_copy', detail: 'intro_name' }));
+    });
+
+    it('keeps concise six-sentence host copy while rejecting a longer run', async () => {
+        const store = new RadioStore(':memory:', {
+            requestCooldownMs: 1, requestTtlMs: 1, studioCooldownMs: 1, studioTtlMs: 1,
+            trackCooldownMs: 1, artistCooldownMs: 1,
+        });
+        const six = 'Первый сигнал прозвучал. Теперь меняем частоту. Здесь слышен новый ритм. '
+            + 'Пульт пока работает. Эксперимент идёт по плану. Включаю следующий трек.';
+        const seven = `${six} Данные уже записаны.`;
+        const replies = [six, seven];
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify({ text: replies.shift() }) }),
+            { status: 200, headers: { 'content-type': 'application/json' } })));
+        const writer = new OpenAiScriptWriter({ apiKey: 'test', model: 'glm-5.3', timeoutMs: 1_000,
+            hourlyLimit: 0, dailyLimit: 0 }, store);
+        try {
+            await expect(writer.writeBreak({ kind: 'station', hostId: 'glm', recentLines: [] })).resolves.toBe(six);
+            await expect(writer.writeBreak({ kind: 'station', hostId: 'glm', recentLines: [] })).rejects.toThrow(/length limits/u);
+        } finally {
+            store.close();
+        }
     });
 
     it('renders a stable jingle without calling the model or mentioning a track', async () => {

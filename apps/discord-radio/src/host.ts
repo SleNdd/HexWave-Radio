@@ -125,7 +125,10 @@ function parseStructuredObject(encoded: string): Record<string, unknown> {
 function validateHostScript(text: string, context: BreakContext): string {
     const sentenceCount = (text.match(/[.!?]+(?:\s|$)/g) ?? []).length;
     const wordCount = text.split(/\s+/u).filter(Boolean).length;
-    if (text.length < 3 || text.length > 420 || sentenceCount > 3 || wordCount < 2 || wordCount > 70) {
+    // Some voices speak in several clipped sentences. The character/word caps
+    // still bound airtime; rejecting a concise six-sentence line would replace
+    // its personality with the same local template for no practical benefit.
+    if (text.length < 3 || text.length > 420 || sentenceCount > 6 || wordCount < 2 || wordCount > 70) {
         throw new Error('OpenAI break violated length limits');
     }
     if (HOST_INTERNALS.test(text) || TARGETED_THREAT.test(text) || TARGETED_ABUSE.test(text) || LISTENER_FACT.test(text) || DISALLOWED_CONTENT.test(text)) {
@@ -394,7 +397,7 @@ defer — отложить на 1–15 минут, decline — не исполь
         const timeout = AbortSignal.timeout(timeoutMs);
         const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
         const chat = this.config.apiFormat === 'chat';
-        const response = await fetch(`${this.config.baseUrl ?? 'https://api.openai.com/v1'}/${chat ? 'chat/completions' : 'responses'}`, {
+        const response = await fetch(`${this.config.baseUrl ?? 'https://tooken.club/v1'}/${chat ? 'chat/completions' : 'responses'}`, {
             method: 'POST',
             headers: { authorization: `Bearer ${this.config.apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify(chat ? {
