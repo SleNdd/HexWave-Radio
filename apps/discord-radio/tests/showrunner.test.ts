@@ -93,6 +93,8 @@ describe('showrunner', () => {
         expect(sent.model).toBe('grok-4.7');
         expect(sent.messages[0]?.content).toContain('Большинство предложений должно соответствовать твоему ядру');
         expect(sent.messages[0]?.content).toContain('обычно прозвучат лишь 3–4 трека');
+        expect(sent.messages[0]?.content).toContain('от 3 до 100 символов');
+        expect(sent.messages[0]?.content).toContain('от 2 до 80 символов');
         store.close();
     });
 
