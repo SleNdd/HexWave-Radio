@@ -27,6 +27,7 @@ public final class Deadair: Sendable {
     public let personasAuditions: PersonasAuditionsClient
     public let personas: PersonasClient
     public let playlists: PlaylistsClient
+    public let stationPlaylists: StationPlaylistsClient
     public let playout: PlayoutClient
     public let plugins: PluginsClient
     public let podcasts: PodcastsClient
@@ -66,6 +67,7 @@ public final class Deadair: Sendable {
         self.personasAuditions = PersonasAuditionsClient(http: http)
         self.personas = PersonasClient(http: http)
         self.playlists = PlaylistsClient(http: http)
+        self.stationPlaylists = StationPlaylistsClient(http: http)
         self.playout = PlayoutClient(http: http)
         self.plugins = PluginsClient(http: http)
         self.podcasts = PodcastsClient(http: http)

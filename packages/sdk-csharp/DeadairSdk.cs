@@ -40,6 +40,7 @@ public sealed class DeadairSdk : IDisposable
         PersonasAuditions = new PersonasAuditionsClient(Http);
         Personas = new PersonasClient(Http);
         Playlists = new PlaylistsClient(Http);
+        StationPlaylists = new StationPlaylistsClient(Http);
         Playout = new PlayoutClient(Http);
         Plugins = new PluginsClient(Http);
         Podcasts = new PodcastsClient(Http);
@@ -99,6 +100,8 @@ public sealed class DeadairSdk : IDisposable
     public PersonasClient Personas { get; }
 
     public PlaylistsClient Playlists { get; }
+
+    public StationPlaylistsClient StationPlaylists { get; }
 
     public PlayoutClient Playout { get; }
 
