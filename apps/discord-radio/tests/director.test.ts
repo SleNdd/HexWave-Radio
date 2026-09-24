@@ -335,6 +335,31 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it('does not apply a delayed skip to the next on-air item', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const skip = vi.fn(() => true);
+        const output = { skip, stopAll: () => undefined } as unknown as OutputFanout;
+        const radio = new RadioDirector(store, [], {} as MediaCache, output);
+        const internals = radio as unknown as {
+            playing: boolean;
+            currentItemId: number;
+            mailbox: { run<T>(task: () => Promise<T>): Promise<T> };
+        };
+        internals.playing = true;
+        internals.currentItemId = 1;
+        let release!: () => void;
+        const blocker = internals.mailbox.run(() => new Promise<void>(resolve => { release = resolve; }));
+        await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+        const pendingSkip = radio.skip();
+        internals.currentItemId = 2;
+        release();
+        await blocker;
+        expect(await pendingSkip).toBe('idle');
+        expect(skip).not.toHaveBeenCalled();
+        await radio.stop();
+        store.close();
+    });
+
     it('keeps the current track audible when skip has no ready successor unless forced', async () => {
         const store = new RadioStore(':memory:', policy);
         const id = store.enqueueEditorial(found);

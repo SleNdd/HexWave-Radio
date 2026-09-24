@@ -148,10 +148,13 @@ export class DiscordOutputFanout implements OutputFanout {
     }
 
     skip(): boolean {
-        if (!this.active) return false;
+        if (!this.active || this.player.state.status === AudioPlayerStatus.Idle) return false;
         this.skipped = true;
-        this.liveStream?.stop();
-        return this.player.stop(true);
+        const stopped = this.player.stop(true);
+        if (!stopped) this.skipped = false;
+        // A successful stop emits Idle synchronously; its normal cleanup also
+        // stops the optional HTTP encoder. Do not cut the stream on a no-op.
+        return stopped;
     }
 
     stopGuild(guildId: string): void {

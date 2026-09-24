@@ -236,14 +236,21 @@ export class RadioDirector {
 
     async skip(force = false): Promise<'skipped' | 'preparing' | 'idle'> {
         if (!this.playing || this.currentItemId === undefined) return 'idle';
-        if (!force && !(await this.mailbox.run(() => this.store.peekNextForPlayback()))) {
-            void this.ensurePrepared().catch(error => {
-                this.lastError = error instanceof Error ? error.message : 'media preparation failed';
-            });
-            return 'preparing';
+        const targetItemId = this.currentItemId;
+        if (!force) {
+            const next = await this.mailbox.run(() => this.store.peekNextForPlayback());
+            // The current resource may have completed while the mailbox was busy.
+            // A stale owner command must never skip the following on-air item.
+            if (!this.playing || this.currentItemId !== targetItemId) return 'idle';
+            if (!next) {
+                void this.ensurePrepared().catch(error => {
+                    this.lastError = error instanceof Error ? error.message : 'media preparation failed';
+                });
+                return 'preparing';
+            }
         }
         if (!this.output.skip()) return 'idle';
-        this.skipRequestedItemId = this.currentItemId;
+        this.skipRequestedItemId = targetItemId;
         return 'skipped';
     }
 

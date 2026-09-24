@@ -23,6 +23,18 @@ function connection(status: VoiceConnectionStatus, channelId: string | null = nu
 }
 
 describe('DiscordOutputFanout shared programme', () => {
+    it('does not mark or stop an already idle player as skipped', () => {
+        const stopLive = vi.fn();
+        const fanout = new DiscordOutputFanout(3, { stop: stopLive, close: vi.fn() } as never);
+        const internals = fanout as unknown as FanoutInternals & { skipped: boolean };
+        internals.active = { reject: vi.fn() };
+        expect(fanout.skip()).toBe(false);
+        expect(internals.skipped).toBe(false);
+        expect(stopLive).not.toHaveBeenCalled();
+        internals.active = undefined;
+        fanout.stopAll();
+    });
+
     it('keeps the audio player advancing without Discord subscribers', () => {
         const fanout = new DiscordOutputFanout();
         expect(vi.mocked(createAudioPlayer)).toHaveBeenCalledWith({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
