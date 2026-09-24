@@ -114,7 +114,9 @@ Three uninterrupted empty minutes disconnect only that guild output. Joining and
 leaving one output does not pause, duplicate, or restart the shared running order.
 
 `track_quarantine` is separate from `play_items.state='failed'`: a terminal media
-failure suppresses reselection of that provider track for 15 minutes, while an
+failure suppresses reselection of that provider track for 15 minutes, or six hours
+when the provider explicitly returns 403/404/410. The persisted `retry_after`
+is backfilled for legacy rows on migration. An
 owner-rejected request does not mark the recording itself unplayable. Transient
 download errors and preparation timeouts keep an editorial or requested item
 queued for durable retries after 15 and 45 seconds, up to three claims; only then

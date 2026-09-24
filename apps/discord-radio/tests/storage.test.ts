@@ -501,6 +501,61 @@ describe('RadioStore', () => {
         reopened.close();
     });
 
+    it('keeps provider 403 tracks out of rotation for six hours across restart', () => {
+        const { store, path } = diskStore();
+        const now = 5_100_000;
+        const song = track('unavailable');
+        const id = store.enqueueEditorialIfEligible(song, now)!;
+        store.failItem(id, 'YouTube Music resolve failed (403)', now + 1);
+        store.close();
+        const reopened = new RadioStore(path, policy);
+        expect(reopened.enqueueEditorialIfEligible(song, now + 15 * 60_000 + 1)).toBeUndefined();
+        expect(reopened.enqueueEditorialIfEligible(song, now + 6 * 60 * 60_000 + 1)).toBeTypeOf('number');
+        reopened.close();
+    });
+
+    it('does not shorten a 403 hold after a later generic failure on the same track', () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = 5_150_000;
+        const song = track('same-song');
+        store.failItem(store.enqueueEditorial(song, now), 'YouTube Music resolve failed (403)', now + 1);
+        store.failItem(store.enqueueEditorial(song, now + 2), 'fetch failed', now + 60_000);
+        expect(store.enqueueEditorialIfEligible(song, now + 16 * 60_000)).toBeUndefined();
+        expect(store.enqueueEditorialIfEligible(song, now + 6 * 60 * 60_000 + 1)).toBeTypeOf('number');
+        store.close();
+    });
+
+    it('does not treat an unrelated error containing a 403 fragment as a provider denial', () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = 5_180_000;
+        const song = track('unrelated');
+        store.failItem(store.enqueueEditorial(song, now), 'local decoder error (403)', now + 1);
+        expect(store.enqueueEditorialIfEligible(song, now + 15 * 60_000 + 1)).toBeTypeOf('number');
+        store.close();
+    });
+
+    it('migrates old 403 quarantine rows without shortening their remaining hold', () => {
+        const root = mkdtempSync(join(tmpdir(), 'discord-radio-old-quarantine-'));
+        roots.push(root);
+        const path = join(root, 'radio.sqlite');
+        const now = 5_200_000;
+        const old = new DatabaseSync(path);
+        old.exec(`CREATE TABLE tracks(provider TEXT,provider_id TEXT,title TEXT,artist TEXT,duration_ms INTEGER,
+                PRIMARY KEY(provider,provider_id));
+            INSERT INTO tracks VALUES('ytmusic','old-song','Old Song','Old Artist',180000);
+            CREATE TABLE play_items(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,state TEXT NOT NULL,
+                provider TEXT,provider_id TEXT,local_path TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,error TEXT);
+            INSERT INTO play_items VALUES(1,'editorial','failed','ytmusic','old-song',NULL,${now},${now + 1},'YouTube Music resolve failed (403)');
+            CREATE TABLE track_quarantine(provider TEXT NOT NULL,provider_id TEXT NOT NULL,failed_at INTEGER NOT NULL,
+                PRIMARY KEY(provider,provider_id));
+            INSERT INTO track_quarantine VALUES('ytmusic','old-song',${now + 1});`);
+        old.close();
+        const store = new RadioStore(path, policy);
+        expect(store.db.prepare('SELECT retry_after FROM track_quarantine').get()).toEqual({ retry_after: now + 1 + 6 * 60 * 60_000 });
+        expect(store.enqueueEditorialIfEligible({ ...track('old-song', 'Old Artist'), title: 'Old Song' }, now + 15 * 60_000 + 1)).toBeUndefined();
+        store.close();
+    });
+
     it('blocks the same artist and title under a different catalog ID for the full track cooldown', () => {
         const store = new RadioStore(':memory:', policy);
         const now = 5_200_000;
@@ -547,7 +602,8 @@ describe('RadioStore', () => {
         store.failItem(store.enqueueEditorial(song, now), 'YouTube Music audio fetch failed (403)', now + 1);
         const request = { guildId: 'a', userId: 'u1', userName: 'One', track: song };
         expect(store.addRequest({ ...request, now: now + 2 })).toMatchObject({ accepted: false, reason: expect.stringContaining('временно недоступен') });
-        expect(store.addRequest({ ...request, now: now + 15 * 60_000 + 1 })).toMatchObject({ accepted: true });
+        expect(store.addRequest({ ...request, now: now + 15 * 60_000 + 1 })).toMatchObject({ accepted: false });
+        expect(store.addRequest({ ...request, now: now + 6 * 60 * 60_000 + 1 })).toMatchObject({ accepted: true });
         store.close();
     });
 

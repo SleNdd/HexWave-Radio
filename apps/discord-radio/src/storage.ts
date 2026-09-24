@@ -54,6 +54,7 @@ const asSqlValue = (value: unknown): SQLInputValue => {
 
 export class RadioStore {
     private static readonly failedTrackQuarantineMs = 15 * 60_000;
+    private static readonly unavailableTrackQuarantineMs = 6 * 60 * 60_000;
     private static readonly listenerRetryWindowMs = 2 * 60_000;
     private static readonly notificationLeaseMs = 60_000;
     private static readonly maxNotificationAttempts = 5;
@@ -105,6 +106,7 @@ export class RadioStore {
                 provider TEXT NOT NULL,
                 provider_id TEXT NOT NULL,
                 failed_at INTEGER NOT NULL,
+                retry_after INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(provider, provider_id),
                 FOREIGN KEY(provider, provider_id) REFERENCES tracks(provider, provider_id)
             );
@@ -210,6 +212,20 @@ export class RadioStore {
             const playColumns = new Set((this.db.prepare('PRAGMA table_info(play_items)').all() as Row[]).map(row => asString(row.name)));
             if (!playColumns.has('preparation_attempts')) this.db.exec('ALTER TABLE play_items ADD COLUMN preparation_attempts INTEGER NOT NULL DEFAULT 0');
             if (!playColumns.has('retry_at')) this.db.exec('ALTER TABLE play_items ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0');
+            const quarantineColumns = new Set((this.db.prepare('PRAGMA table_info(track_quarantine)').all() as Row[]).map(row => asString(row.name)));
+            if (!quarantineColumns.has('retry_after')) this.db.exec('ALTER TABLE track_quarantine ADD COLUMN retry_after INTEGER NOT NULL DEFAULT 0');
+            const legacyQuarantine = this.db.prepare('SELECT provider,provider_id,failed_at FROM track_quarantine WHERE retry_after=0').all() as Row[];
+            const legacyFailure = this.db.prepare(`SELECT error FROM play_items WHERE provider=? AND provider_id=?
+                AND state='failed' AND updated_at=? ORDER BY id DESC LIMIT 1`);
+            const updateQuarantine = this.db.prepare('UPDATE track_quarantine SET retry_after=? WHERE provider=? AND provider_id=?');
+            for (const row of legacyQuarantine) {
+                const provider = asString(row.provider);
+                const providerId = asString(row.provider_id);
+                const failedAt = asNumber(row.failed_at);
+                const failure = legacyFailure.get(provider, providerId, failedAt) as Row | undefined;
+                const reason = failure?.error ? asString(failure.error) : '';
+                updateQuarantine.run(failedAt + RadioStore.quarantineMs(reason), provider, providerId);
+            }
             const hostColumns = new Set((this.db.prepare('PRAGMA table_info(host_segments)').all() as Row[]).map(row => asString(row.name)));
             if (!hostColumns.has('aired_at')) this.db.exec('ALTER TABLE host_segments ADD COLUMN aired_at INTEGER');
             if (!hostColumns.has('host_id')) this.db.exec('ALTER TABLE host_segments ADD COLUMN host_id TEXT');
@@ -908,9 +924,11 @@ export class RadioStore {
             if (updated.changes === 0) return;
             const failedTrack = this.db.prepare('SELECT provider,provider_id FROM play_items WHERE id=?').get(id) as Row | undefined;
             if (failedTrack?.provider && failedTrack.provider_id) {
-                this.db.prepare(`INSERT INTO track_quarantine(provider,provider_id,failed_at) VALUES(?,?,?)
-                    ON CONFLICT(provider,provider_id) DO UPDATE SET failed_at=excluded.failed_at`)
-                    .run(asString(failedTrack.provider), asString(failedTrack.provider_id), now);
+                this.db.prepare(`INSERT INTO track_quarantine(provider,provider_id,failed_at,retry_after) VALUES(?,?,?,?)
+                    ON CONFLICT(provider,provider_id) DO UPDATE SET failed_at=excluded.failed_at,
+                        retry_after=MAX(track_quarantine.retry_after,excluded.retry_after)`)
+                    .run(asString(failedTrack.provider), asString(failedTrack.provider_id), now,
+                        now + RadioStore.quarantineMs(reason));
             }
             if (wasPlaying) this.restoreProgrammeBeforeClaim(id);
             this.db.prepare("UPDATE requests SET status='rejected' WHERE play_item_id=? AND status='pending'").run(id);
@@ -1177,11 +1195,16 @@ export class RadioStore {
 
     private failedTrackRecently(track: Track, now: number): boolean {
         const failed = this.one(
-            'SELECT MAX(failed_at) AS at FROM track_quarantine WHERE provider=? AND provider_id=?',
+            'SELECT MAX(retry_after) AS retry_after FROM track_quarantine WHERE provider=? AND provider_id=?',
             track.provider,
             track.id,
         );
-        return failed.at !== null && now - asNumber(failed.at) < RadioStore.failedTrackQuarantineMs;
+        return failed.retry_after !== null && now < asNumber(failed.retry_after);
+    }
+
+    private static quarantineMs(reason: string): number {
+        return /^(?:YouTube Music (?:resolve|audio fetch)|Spotify (?:track lookup|audio fetch)) failed \((?:403|404|410)\)$/u.test(reason)
+            ? RadioStore.unavailableTrackQuarantineMs : RadioStore.failedTrackQuarantineMs;
     }
 
     private editorialEligible(track: Track, now: number, replacingFuture: boolean): boolean {

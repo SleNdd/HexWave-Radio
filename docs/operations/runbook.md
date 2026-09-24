@@ -78,8 +78,9 @@ normal operation.
   resolve/download. If transient preparation still fails, the queued item is
   retried durably after 15 and 45 seconds before terminal failure; a listener
   request stays pending during these retries.
-  A track that still fails is quarantined for 15 minutes so editorial rotation
-  does not immediately select it again. A resolver 403 (`needs-account`) is not
+  A track that still fails is quarantined for 15 minutes, or six hours after a
+  provider 403/404/410, so editorial rotation does not immediately select it again.
+  A resolver 403 (`needs-account`) is not
   retried. Check the provider and choose another song; do not bypass music-only
   catalog validation or feed a direct URL into playout.
 - FFmpeg failure: quarantine that cached object, retry once from a clean fetch, then fail
