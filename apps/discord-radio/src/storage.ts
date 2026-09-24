@@ -375,6 +375,12 @@ export class RadioStore {
         return asNumber(this.one("SELECT COUNT(*) AS count FROM play_items WHERE kind='editorial' AND state IN ('queued','preparing','ready','playing')").count);
     }
 
+    completedEditorialSince(since: number): number {
+        const row = this.db.prepare("SELECT COUNT(*) AS count FROM play_items WHERE kind='editorial' AND state='played' AND updated_at>=?")
+            .get(since) as Row;
+        return asNumber(row.count);
+    }
+
     /** Current future editorial order for bounded planner context. */
     upcomingEditorial(limit = 6): Array<{ id: number; track: Track; state: 'queued' | 'preparing' | 'ready' }> {
         const bounded = Math.max(0, Math.min(20, Math.trunc(limit)));
@@ -485,7 +491,7 @@ export class RadioStore {
         });
     }
 
-    /** Atomically append a prepared model run after the ready editorial tail, retiring unfinished old candidates. */
+    /** Commit fresh prepared music and keep at most one old ready song as a continuity bridge. */
     applyEditorialPlan(
         expectedRevision: number,
         proposal: ShowPlanProposal,
@@ -510,7 +516,6 @@ export class RadioStore {
                 seen.add(key);
                 seenSongs.add(identity);
                 seenArtists.add(artist);
-                // Existing ready music remains in the run; only unfinished editorial candidates are retired.
                 if (!this.editorialEligible(track, now, true)) return undefined;
             }
 
@@ -520,6 +525,10 @@ export class RadioStore {
                 .run(revision, valid.theme, JSON.stringify(valid.queries), valid.requestRun, now, now + SHOW_PLAN_TTL_MS, expectedRevision, now);
             if (updated.changes !== 1) return undefined;
             this.db.prepare("UPDATE play_items SET state='expired',updated_at=? WHERE kind='editorial' AND state IN ('queued','preparing')").run(now);
+            const bridge = this.db.prepare("SELECT id FROM play_items WHERE kind='editorial' AND state='ready' ORDER BY created_at,id LIMIT 1")
+                .get() as Row | undefined;
+            this.db.prepare("UPDATE play_items SET state='expired',updated_at=? WHERE kind='editorial' AND state='ready' AND id<>?")
+                .run(now, bridge ? asNumber(bridge.id) : -1);
             const insert = this.db.prepare(`INSERT INTO play_items(kind,state,provider,provider_id,local_path,created_at,updated_at)
                 VALUES('editorial','ready',?,?,?,?,?)`);
             for (const [index, { track, localPath }] of staged.entries()) {

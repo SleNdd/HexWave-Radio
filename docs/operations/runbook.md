@@ -45,7 +45,7 @@ Provider readiness is independent: the radio reports a degraded provider while c
 with any healthy source.
 `RADIO_ROTATION_QUERIES` is retained only as context for a local show-plan
 placeholder; it is never searched for music. All editorial playback candidates
-must originate in a model-authored Luna plan. This variable can be ignored in
+must originate in a model-authored plan from the active host. This variable can be ignored in
 normal operation.
 
 ## Routine checks

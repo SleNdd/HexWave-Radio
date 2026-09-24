@@ -72,6 +72,27 @@ describe('showrunner', () => {
         store.close();
     });
 
+    it('asks the active host model for a ten-song candidate reserve led by its own taste', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const queries = Array.from({ length: 10 }, (_, index) => `Artist ${index} — Song ${index}`);
+        const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: {
+            content: JSON.stringify({ theme: 'Индустриальная ночь', queries, requestRun: 'continue' }),
+        } }] }) }));
+        vi.stubGlobal('fetch', fetchMock);
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', baseUrl: 'https://tooken.club/v1', apiFormat: 'chat',
+            model: 'gpt-6-luna', timeoutMs: 1_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        const proposal = await writer.proposeShowPlan({ hostId: 'grok', hostMusicBrief: 'Industrial, metal, breakcore',
+            currentTheme: 'Лунин поп', recentPlayed: [], upcoming: [] });
+        expect(proposal.queries).toHaveLength(10);
+        const sent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+            model: string; messages: Array<{ content: string }>;
+        };
+        expect(sent.model).toBe('grok-4.7');
+        expect(sent.messages[0]?.content).toContain('Большинство предложений должно соответствовать твоему ядру');
+        expect(sent.messages[0]?.content).toContain('обычно прозвучат лишь 3–4 трека');
+        store.close();
+    });
+
     it('accepts only bounded structured host input decisions', async () => {
         const store = new RadioStore(':memory:', policy);
         const responses = [

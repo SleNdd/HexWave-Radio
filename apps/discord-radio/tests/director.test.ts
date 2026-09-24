@@ -219,6 +219,27 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it('replaces a successful old-host ready tail with one bridge and new-host music', () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = 10_000_000;
+        const fallback = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
+        for (let index = 0; index < 4; index++) {
+            const id = store.enqueueEditorial({ ...found, id: `old-track-${index}`, artist: `Old ${index}` }, now + index);
+            expect(store.claimPreparation()?.id).toBe(id);
+            expect(store.markReady(id, `C:/cache/old-${index}.media`, now)).toBe(true);
+        }
+        const fresh = [0, 1].map(index => ({ track: { ...found, id: `new-track-${index}`,
+            title: `New Song ${index}`, artist: `New ${index}` }, localPath: `C:/cache/new-${index}.media` }));
+        const applied = store.applyEditorialPlan(fallback.revision, {
+            theme: 'Новый ведущий', queries: ['New 0 — New Song 0', 'New 1 — New Song 1',
+                'New 2 — New Song 2'], requestRun: 'alternate',
+        }, fresh, now + 10);
+        expect(applied?.theme).toBe('Новый ведущий');
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-track-0', 'new-track-0', 'new-track-1']);
+        expect(store.db.prepare("SELECT COUNT(*) AS count FROM play_items WHERE state='expired'").get()).toEqual({ count: 3 });
+        store.close();
+    });
+
     it('requests a new show plan before a short authored run reaches silence', async () => {
         const store = new RadioStore(':memory:', policy);
         let now = 10_000_000;
@@ -241,6 +262,37 @@ describe('RadioDirector requests', () => {
         store.nextForPlayback();
         store.finishItem(item.id, now + 1000);
         now += 60_000;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(planner.proposeShowPlan).toHaveBeenCalledOnce());
+        await radio.stop();
+        store.close();
+    });
+
+    it('lets the host revise its programme after four played songs even with a deep ready tail', async () => {
+        const store = new RadioStore(':memory:', policy);
+        let now = 10_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const fallback = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
+        store.replaceShowPlan(fallback.revision, {
+            theme: 'Текущий блок', queries: ['A — A', 'B — B', 'C — C'], requestRun: 'alternate',
+        }, now);
+        for (let index = 0; index < 8; index++) {
+            const id = store.enqueueEditorial({ ...found, id: `planned-${index}`,
+                title: `Song ${index}`, artist: `Artist ${index}` }, now + index);
+            expect(store.claimPreparation()?.id).toBe(id);
+            store.markReady(id, `C:/cache/${index}.media`, now);
+        }
+        for (let index = 0; index < 4; index++) {
+            const item = store.nextForPlayback()!;
+            store.finishItem(item.id, now + 1_000 + index);
+        }
+        now += 6 * 60_000;
+        const planner = { proposeShowPlan: vi.fn(async () => ({
+            theme: 'Поворот ведущего', queries: ['D — D', 'E — E', 'F — F'], requestRun: 'continue' as const,
+        })) };
+        const radio = new RadioDirector(store, [], {} as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner });
         await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
         await vi.waitFor(() => expect(planner.proposeShowPlan).toHaveBeenCalledOnce());
         await radio.stop();

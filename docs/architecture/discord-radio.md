@@ -43,16 +43,17 @@ The showrunner keeps a versioned theme, ordered song-search intentions, and an
 advisory decision about consecutive requests in SQLite.
 Only confirmed `played` rows feed its bounded recent-spin context. A deterministic
 local plan may supply context when no current plan exists, but it never selects
-music. Fixed organizer Luna creates every editorial search through Tooken Club;
-without a valid model-authored plan the station reports degraded, rather than
+music. The active host proposes its own editorial searches through Tooken Club;
+fixed organizer Luna remains responsible for shifts and listener-input decisions.
+Without a valid model-authored plan the station reports degraded, rather than
 inserting random or fixed-genre music. New model proposals request eight to ten
 explicit `artist — title` searches; catalog results must match both metadata
 fields, allowing harmless apostrophe/comma spelling differences. The director
-stages playable media and atomically updates the future run when at least two
+stages up to eight playable candidates and atomically updates the future run when at least two
 new songs are ready, or one verified song when there is no ready successor. The plan
-revision and listener-signal version still match. Already prepared songs from
-the preceding AI plan remain playable during the handoff; only queued or
-preparing old candidates are retired. Provider search also rechecks
+revision, listener-signal version and host shift must still match. A successful
+pivot keeps at most one old ready song as a continuity bridge; failed staging
+keeps the entire previous ready tail. Provider search also rechecks
 the revision before committing a candidate. Neither
 planning nor narration is awaited at a music boundary. Request runs follow the
 saved advisory decision when an editorial track is ready; an available request

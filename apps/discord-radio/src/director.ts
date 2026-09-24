@@ -28,6 +28,7 @@ interface PreparedBreak {
     requestSignature?: string;
     segmentId?: number;
     hostShiftId?: number;
+    planRevision?: number;
 }
 
 class Mailbox {
@@ -54,6 +55,8 @@ export class RadioDirector {
     private running = false;
     private playing = false;
     private currentItemId?: number;
+    private currentPlaybackStartedAt?: number;
+    private currentPlaybackDurationMs?: number;
     private skipRequestedItemId?: number;
     private ticking = false;
     private mode: RadioStatus['mode'] = 'starting';
@@ -292,7 +295,9 @@ export class RadioDirector {
                     this.readyBreaks.delete(upcoming.id);
                     if (prepared?.segmentId !== undefined) await this.mailbox.run(() => this.store.discardHostSegment(prepared.segmentId!));
                     const broadcast = await this.mailbox.run(() => ({ memory: this.store.showMemory(),
-                        currentTheme: this.store.currentShowPlan()?.theme, recentPlayed: this.store.recentPlayed(8) }));
+                        currentTheme: this.store.currentShowPlan()?.theme,
+                        planRevision: this.store.currentShowPlan()?.revision,
+                        recentPlayed: this.store.recentPlayed(8) }));
                     const refresh = this.abortable(this.presenter.prepare({ kind: 'request', hostId: hostShift?.hostId,
                         requesterName: currentRequest.userName,
                         ...(currentRequest.dedication ? { dedication: currentRequest.dedication } : {}), nextTrack: upcoming.track,
@@ -302,12 +307,14 @@ export class RadioDirector {
                         await this.mailbox.run(() => {
                             if (this.isStopped() || this.store.peekNextForPlayback()?.id !== upcoming.id ||
                                 this.store.currentHostShift()?.id !== hostShift?.id ||
+                                this.store.currentShowPlan()?.revision !== broadcast.planRevision ||
                                 JSON.stringify(this.store.requestContext(upcoming.id)) !== JSON.stringify(currentRequest)) return;
                             const segmentId = this.store.recordHostSegment(upcoming.id, rendered.script, rendered.path,
                                 Date.now(), hostShift ? { hostId: hostShift.hostId, shiftId: hostShift.id } : undefined);
                             if (segmentId !== undefined) this.readyBreaks.set(upcoming.id,
                                 { path: rendered.path, kind: 'request', segmentId, hostId: hostShift?.hostId,
                                     hostShiftId: hostShift?.id,
+                                    planRevision: broadcast.planRevision,
                                     requestSignature: JSON.stringify(currentRequest) });
                         });
                     }).catch(() => undefined);
@@ -325,7 +332,10 @@ export class RadioDirector {
                 return;
             }
             const candidateBreak = this.readyBreaks.get(next.id);
-            const preparedBreak = candidateBreak?.hostId === hostShift?.hostId ? candidateBreak : undefined;
+            const planRevision = await this.mailbox.run(() => this.store.currentShowPlan()?.revision);
+            const preparedBreak = candidateBreak && candidateBreak.hostId === hostShift?.hostId &&
+                (candidateBreak.kind === 'jingle' || candidateBreak.planRevision === planRevision)
+                ? candidateBreak : undefined;
             if (candidateBreak && !preparedBreak && candidateBreak.segmentId !== undefined) {
                 await this.mailbox.run(() => this.store.discardHostSegment(candidateBreak.segmentId!));
             }
@@ -446,6 +456,8 @@ export class RadioDirector {
             for (let attempt = 0; attempt < 2; attempt++) {
                 try {
                     const playbackStartedAt = Date.now();
+                    this.currentPlaybackStartedAt = playbackStartedAt;
+                    this.currentPlaybackDurationMs = item.track?.durationMs;
                     const playback = this.output.play(currentPath);
                     logPlayout('radio.track.started', item.id, { attempt: attempt + 1 });
                     const preparation = this.ensurePrepared().catch(error => {
@@ -533,6 +545,8 @@ export class RadioDirector {
             }
             if (this.skipRequestedItemId === item.id) this.skipRequestedItemId = undefined;
             if (this.currentItemId === item.id) this.currentItemId = undefined;
+            this.currentPlaybackStartedAt = undefined;
+            this.currentPlaybackDurationMs = undefined;
             this.playing = false;
             if (this.running) void this.tick();
         }
@@ -727,7 +741,7 @@ export class RadioDirector {
         const attempts = this.providers.length * queries.length * 3;
         const deadline = Date.now() + 3 * this.searchTimeoutMs;
         let addedAny = false;
-        for (let attempt = 0; attempt < attempts && !this.workAbort.signal.aborted && Date.now() < deadline && this.store.editorialPipelineCount() < 8; attempt++) {
+        for (let attempt = 0; attempt < attempts && !this.workAbort.signal.aborted && Date.now() < deadline && this.store.editorialPipelineCount() < 10; attempt++) {
             const cursor = this.rotationCursor++;
             const provider = this.providers[cursor % this.providers.length]!;
             const query = queries[Math.floor(cursor / this.providers.length) % queries.length]!;
@@ -773,8 +787,10 @@ export class RadioDirector {
             const recentPlayed = this.store.recentPlayed(20, now);
             const plan = this.store.ensureFallbackShowPlan(fallbackShowPlan(now, recentPlayed, this.rotationQueries), now);
             const upcoming = this.store.upcomingEditorial(8).map(item => ({ title: item.track.title, artist: item.track.artist }));
+            const shift = this.store.currentHostShift();
             return { plan, recentPlayed, memory: this.store.showMemory(now), upcoming,
-                hostId: this.store.currentHostShift()?.hostId,
+                hostId: shift?.hostId, shiftId: shift?.id, shiftStartedAt: shift?.startedAt,
+                completedInPlan: this.store.completedEditorialSince(plan.createdAt),
                 editorialDepth: this.store.editorialPipelineCount(),
                 noReadySuccessor: !this.store.peekNextForPlayback() };
         });
@@ -788,11 +804,13 @@ export class RadioDirector {
         } else if (snapshot.editorialDepth > 4) {
             this.editorialDepthHighWater = snapshot.editorialDepth;
         }
-        const reviewDue = snapshot.plan.source === 'fallback' || signalDue || lowReserveDue ||
+        const shiftDue = snapshot.shiftStartedAt !== undefined && snapshot.plan.createdAt < snapshot.shiftStartedAt;
+        const reviewDue = snapshot.plan.source === 'fallback' || signalDue || shiftDue ||
+            snapshot.completedInPlan >= 4 || lowReserveDue ||
             now - snapshot.plan.createdAt >= 20 * 60_000;
-        const minInterval = signalDue ? 0 : criticalReserve ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000;
+        const minInterval = signalDue || shiftDue ? 0 : criticalReserve ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000;
         const earliest = Math.max(this.showPlanRetryAt, this.lastShowPlanAttemptAt + minInterval,
-            snapshot.plan.source === 'model' && !signalDue && !lowReserveDue ? snapshot.plan.createdAt + 5 * 60_000 : 0);
+            snapshot.plan.source === 'model' && !signalDue && !shiftDue && !lowReserveDue ? snapshot.plan.createdAt + 5 * 60_000 : 0);
         if (planner && reviewDue && !this.showPlanning && now >= earliest) {
             this.lastShowPlanAttemptAt = now;
             const signalVersion = this.replanVersion;
@@ -810,7 +828,8 @@ export class RadioDirector {
                     const minimum = snapshot.noReadySuccessor ? 1 : 2;
                     if (this.providers.length > 0 && staged.tracks.length < minimum) throw new Error(`Could not prepare ${minimum} new show-plan tracks`);
                     const applied = await this.mailbox.run(() => {
-                        if (this.isStopped() || this.replanVersion !== signalVersion) return undefined;
+                        if (this.isStopped() || this.replanVersion !== signalVersion ||
+                            this.store.currentHostShift()?.id !== snapshot.shiftId) return undefined;
                         const next = this.providers.length > 0
                             ? this.store.applyEditorialPlan(snapshot.plan.revision, proposal, staged.tracks)
                             : this.store.replaceShowPlan(snapshot.plan.revision, proposal);
@@ -820,6 +839,14 @@ export class RadioDirector {
                     if (!applied) return;
                     if (this.replanVersion === signalVersion) this.appliedReplanVersion = signalVersion;
                     this.showPlanRetryAt = 0;
+                    for (const [itemId, segment] of this.readyBreaks) {
+                        if (segment.kind === 'jingle' || segment.planRevision === applied.revision) continue;
+                        this.readyBreaks.delete(itemId);
+                        if (segment.segmentId !== undefined) await this.mailbox.run(() => this.store.discardHostSegment(segment.segmentId!));
+                    }
+                    if (this.playing) void this.prepareUpcomingBreak(this.tracksSinceStudio, this.remainingCurrentTrackMs()).catch(error => {
+                        this.lastError = error instanceof Error ? error.message : 'post-plan host preparation failed';
+                    });
                     console.log(JSON.stringify({ level: 'info', event: 'show.plan.applied', revision: applied.revision,
                         theme: applied.theme, readyTracks: staged.tracks.length }));
                     const previousPreparation = this.preparation;
@@ -863,7 +890,7 @@ export class RadioDirector {
         const rejected = { search: 0, metadata: 0, repeat: 0, cooldown: 0, media: 0 };
         try {
           for (const query of proposal.queries) {
-            if (staged.length >= 5 || Date.now() >= deadline || this.workAbort.signal.aborted) break;
+            if (staged.length >= 8 || Date.now() >= deadline || this.workAbort.signal.aborted) break;
             const searches = await Promise.allSettled(this.providers.map(provider => this.withDeadline(
                 signal => provider.search(query, 5, signal), this.searchTimeoutMs, `${provider.name} search timed out`,
             )));
@@ -1025,7 +1052,8 @@ export class RadioDirector {
         const studio = !request && studioTracksBeforeCurrent >= 1 ? await this.mailbox.run(() => this.store.peekStudioMessage()) : undefined;
         const jingle = !request && !studio && (await this.mailbox.run(() => this.store.jingleDue(this.jingleEveryMs)));
         const broadcast = await this.mailbox.run(() => ({ memory: this.store.showMemory(),
-            currentTheme: this.store.currentShowPlan()?.theme, recentPlayed: this.store.recentPlayed(8),
+            currentTheme: this.store.currentShowPlan()?.theme, planRevision: this.store.currentShowPlan()?.revision,
+            recentPlayed: this.store.recentPlayed(8),
             hostShift: this.store.currentHostShift() }));
         const shift = broadcast.hostShift;
         if (shift && !this.pendingHostShift && shift.plannedEndAt <= Date.now() + currentDurationMs) {
@@ -1061,17 +1089,30 @@ export class RadioDirector {
             await this.mailbox.run(() => {
                 if (this.isStopped() || this.store.peekNextForPlayback()?.id !== next.id ||
                     this.store.currentHostShift()?.id !== broadcast.hostShift?.id ||
+                    this.store.currentShowPlan()?.revision !== broadcast.planRevision ||
                     (request && JSON.stringify(this.store.requestContext(next.id)) !== JSON.stringify(request))) return;
                 const segmentId = this.store.recordHostSegment(next.id, rendered.script, rendered.path,
                     Date.now(), hostId ? { hostId, ...(hostId === shift?.hostId ? { shiftId: shift.id } : {}) } : undefined);
                 if (segmentId !== undefined) this.readyBreaks.set(next.id,
                     { path: rendered.path, kind, segmentId, hostId, hostShiftId: shift?.id,
+                        planRevision: broadcast.planRevision,
                         ...(studio ? { studioId: studio.id } : {}),
                         ...(request ? { requestSignature: JSON.stringify(request) } : {}) });
             });
         } finally {
             this.breaksInFlight.delete(next.id);
+            const changed = await this.mailbox.run(() => this.store.currentShowPlan()?.revision !== broadcast.planRevision);
+            if (changed && this.playing && !this.isStopped()) {
+                void this.prepareUpcomingBreak(studioTracksBeforeCurrent, this.remainingCurrentTrackMs()).catch(error => {
+                    this.lastError = error instanceof Error ? error.message : 'host refresh after programme pivot failed';
+                });
+            }
         }
+    }
+
+    private remainingCurrentTrackMs(): number {
+        return Math.max(0, (this.currentPlaybackDurationMs ?? 0) -
+            (Date.now() - (this.currentPlaybackStartedAt ?? Date.now())) - 10_000);
     }
 
     private reserveTrack(track: Track): () => void {

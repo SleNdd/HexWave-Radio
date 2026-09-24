@@ -126,7 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RadioConfig {
                       baseUrl: aiBaseUrl,
                       apiFormat: 'chat' as const,
                       model: organizerModel,
-                      timeoutMs: integer(env, 'OPENAI_TIMEOUT_MS', 20_000),
+                      timeoutMs: integer(env, 'OPENAI_TIMEOUT_MS', 45_000),
                       hourlyLimit: integer(env, 'OPENAI_HOURLY_LIMIT', 0, 0),
                       dailyLimit: integer(env, 'OPENAI_DAILY_LIMIT', 0, 0),
                   },

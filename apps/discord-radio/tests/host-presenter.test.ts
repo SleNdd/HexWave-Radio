@@ -48,6 +48,18 @@ it('uses an understandable fallback line and avoids the most recently aired stat
     expect(request).not.toMatch(/кожан/iu);
 });
 
+it('keeps Grok varied through a run of model timeouts', async () => {
+    const writer = new TemplateScriptWriter();
+    const recentLines: string[] = [];
+    for (let index = 0; index < 15; index++) {
+        const line = await writer.writeBreak({ kind: 'station', hostId: 'grok', recentLines,
+            nextTrack: { provider: 'ytmusic', id: `new-track-${index}`, artist: `Artist ${index}`,
+                title: `Song ${index}`, durationMs: 180_000 } });
+        expect(recentLines).not.toContain(line);
+        recentLines.push(line);
+    }
+});
+
 it('returns the actual spoken script with a cached audio artifact', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'discord-radio-host-test-'));
     try {
