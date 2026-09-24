@@ -109,6 +109,17 @@ describe('configuration and boundaries', () => {
         expect(JSON.stringify(warning.mock.calls)).not.toContain('secret-user-message');
     });
 
+    it('identifies a rejected presenter line without logging its text', async () => {
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const writer = new FallbackScriptWriter(
+            { writeBreak: async () => { throw new Error('AI introduction omitted the on-air name'); } },
+            new TemplateScriptWriter(),
+        );
+        expect(await writer.writeBreak({ kind: 'intro', hostId: 'glm', recentLines: [] })).toContain('Глим');
+        expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'host.script.fallback',
+            reason: 'invalid_copy', detail: 'intro_name' }));
+    });
+
     it('renders a stable jingle without calling the model or mentioning a track', async () => {
         let modelCalls = 0;
         const writer = new FallbackScriptWriter(

@@ -445,12 +445,23 @@ export class FallbackScriptWriter implements ScriptWriter {
         } catch (error) {
             signal?.throwIfAborted();
             const message = error instanceof Error ? error.message : '';
+            // Only emit a closed diagnostic code: upstream copy may contain
+            // listener text and must never reach the operational logs.
+            const copyDetail = new Map([
+                ['OpenAI break violated length limits', 'length'],
+                ['OpenAI break violated presenter safety rules', 'safety'],
+                ['AI introduction omitted the on-air name', 'intro_name'],
+                ['AI station break repeated an earlier listener mention', 'old_listener'],
+                ['OpenAI break invented an unsupported fact', 'unsupported_fact'],
+                ['AI returned invalid structured text', 'structured_text'],
+            ]).get(message);
             const reason = message === 'OpenAI budget exhausted' ? 'budget'
                 : /AI API failed \(429\)/u.test(message) ? 'rate_limit'
                   : /AI API failed \(5\d\d\)/u.test(message) ? 'upstream_failure'
                     : /timed out|TimeoutError/iu.test(message) || (error instanceof Error && error.name === 'TimeoutError') ? 'timeout'
-                      : /invalid|violated|no structured text/iu.test(message) ? 'invalid_copy' : 'other';
-            console.warn(JSON.stringify({ level: 'warn', event: 'host.script.fallback', reason }));
+                      : copyDetail || /invalid|violated|no structured text/iu.test(message) ? 'invalid_copy' : 'other';
+            console.warn(JSON.stringify({ level: 'warn', event: 'host.script.fallback', reason,
+                ...(reason === 'invalid_copy' && copyDetail ? { detail: copyDetail } : {}) }));
             return await this.fallback.writeBreak(context, signal);
         }
     }
