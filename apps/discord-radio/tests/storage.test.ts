@@ -534,6 +534,17 @@ describe('RadioStore', () => {
         store.close();
     });
 
+    it('quarantines a verified media candidate that fails before queue insertion', () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = 5_190_000;
+        const song = track('staged-failure');
+        store.quarantineFailedCandidate(song, 'YouTube Music audio fetch failed (403)', now);
+        expect(store.db.prepare('SELECT COUNT(*) AS n FROM play_items').get()).toEqual({ n: 0 });
+        expect(store.enqueueEditorialIfEligible(song, now + 15 * 60_000)).toBeUndefined();
+        expect(store.enqueueEditorialIfEligible(song, now + 6 * 60 * 60_000)).toBeTypeOf('number');
+        store.close();
+    });
+
     it('migrates old 403 quarantine rows without shortening their remaining hold', () => {
         const root = mkdtempSync(join(tmpdir(), 'discord-radio-old-quarantine-'));
         roots.push(root);

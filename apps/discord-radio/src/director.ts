@@ -922,9 +922,13 @@ export class RadioDirector {
                     seenSongs.add(identity);
                     seenArtists.add(artistKey);
                     break;
-                } catch {
+                } catch (error) {
                     unreserve();
                     rejected.media++;
+                    if (this.workAbort.signal.aborted) throw error;
+                    const reason = error instanceof Error ? error.message : 'media preparation failed';
+                    if (!this.isCandidateMediaFailure(reason)) throw error;
+                    await this.mailbox.run(() => this.store.quarantineFailedCandidate(track, reason));
                     // Try another verified catalog track. The old ready run remains audible.
                 }
             }
@@ -1179,6 +1183,10 @@ export class RadioDirector {
 
     private isRetryableMediaFailure(reason: string): boolean {
         return !/skipped by owner|no discord voice outputs|audio output stopped|already has an active item/iu.test(reason);
+    }
+
+    private isCandidateMediaFailure(reason: string): boolean {
+        return /^(?:(?:YouTube Music (?:resolve|audio fetch)|Spotify (?:track lookup|audio fetch)) failed \((?:400|403|404|410|415|422)\)|YouTube Music resolver returned (?:no URL|a non-HTTPS URL|an untrusted media host|an expired URL)|(?:YouTube Music|Spotify shim) returned unsafe content type .+|Provider returned an empty track|Track exceeds cache item limit)$/u.test(reason);
     }
 
     private isOutputUnavailable(reason: string): boolean {

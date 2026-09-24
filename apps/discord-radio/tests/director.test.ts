@@ -541,6 +541,54 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it('quarantines an unavailable staged candidate and commits the next verified song', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const proposal = { theme: 'Новый блок', queries: [
+            'Test Unit — Night Circuit', 'Fresh Artist — Fresh Song', 'Missing Artist — Lost Song',
+        ], requestRun: 'alternate' as const };
+        const fresh = { ...found, id: 'fresh-song', artist: 'Fresh Artist', title: 'Fresh Song' };
+        const planner = { proposeShowPlan: vi.fn(async () => proposal) };
+        const search = vi.fn(async (query: string) => query === proposal.queries[0] ? [found]
+            : query === proposal.queries[1] ? [fresh] : []);
+        const materialize = vi.fn(async (track: Track) => {
+            if (track.id === found.id) throw new Error('YouTube Music resolve failed (403)');
+            return 'C:/cache/fresh.media';
+        });
+        const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider],
+            { materialize } as unknown as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner });
+        (radio as unknown as { ensurePrepared: () => Promise<void> }).ensurePrepared = async () => undefined;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe('Новый блок'));
+        expect(materialize).toHaveBeenCalledTimes(2);
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual([fresh.id]);
+        expect(store.canQueueEditorial(found)).toBe(false);
+        await radio.stop();
+        store.close();
+    });
+
+    it('does not quarantine a good candidate when the local cache cannot write', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const proposal = { theme: 'Новый блок', queries: [
+            'Test Unit — Night Circuit', 'Another Artist — Song', 'Third Artist — Song',
+        ], requestRun: 'alternate' as const };
+        const planner = { proposeShowPlan: vi.fn(async () => proposal) };
+        const search = vi.fn(async () => [found]);
+        const materialize = vi.fn(async () => { throw new Error('EACCES: cache write denied'); });
+        const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider],
+            { materialize } as unknown as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner });
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect((radio as unknown as { showPlanning?: Promise<void> }).showPlanning).toBeUndefined());
+        expect(search).toHaveBeenCalledOnce();
+        expect(store.db.prepare('SELECT COUNT(*) AS n FROM track_quarantine').get()).toEqual({ n: 0 });
+        expect(store.canQueueEditorial(found)).toBe(true);
+        await radio.stop();
+        store.close();
+    });
+
     it('commits one fresh verified song promptly when only two editorial tracks remain', async () => {
         const store = new RadioStore(':memory:', policy);
         let now = 10_000_000;

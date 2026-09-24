@@ -924,16 +924,27 @@ export class RadioStore {
             if (updated.changes === 0) return;
             const failedTrack = this.db.prepare('SELECT provider,provider_id FROM play_items WHERE id=?').get(id) as Row | undefined;
             if (failedTrack?.provider && failedTrack.provider_id) {
-                this.db.prepare(`INSERT INTO track_quarantine(provider,provider_id,failed_at,retry_after) VALUES(?,?,?,?)
-                    ON CONFLICT(provider,provider_id) DO UPDATE SET failed_at=excluded.failed_at,
-                        retry_after=MAX(track_quarantine.retry_after,excluded.retry_after)`)
-                    .run(asString(failedTrack.provider), asString(failedTrack.provider_id), now,
-                        now + RadioStore.quarantineMs(reason));
+                this.recordTrackQuarantine(asString(failedTrack.provider), asString(failedTrack.provider_id), reason, now);
             }
             if (wasPlaying) this.restoreProgrammeBeforeClaim(id);
             this.db.prepare("UPDATE requests SET status='rejected' WHERE play_item_id=? AND status='pending'").run(id);
             this.event('play.failed', { itemId: id, reason }, now);
         });
+    }
+
+    /** A verified catalog candidate can fail before it becomes a play item. */
+    quarantineFailedCandidate(track: Track, reason: string, now = Date.now()): void {
+        this.transaction(() => {
+            this.putTrack(track);
+            this.recordTrackQuarantine(track.provider, track.id, reason, now);
+        });
+    }
+
+    private recordTrackQuarantine(provider: string, providerId: string, reason: string, now: number): void {
+        this.db.prepare(`INSERT INTO track_quarantine(provider,provider_id,failed_at,retry_after) VALUES(?,?,?,?)
+            ON CONFLICT(provider,provider_id) DO UPDATE SET failed_at=excluded.failed_at,
+                retry_after=MAX(track_quarantine.retry_after,excluded.retry_after)`)
+            .run(provider, providerId, now, now + RadioStore.quarantineMs(reason));
     }
 
     nextForPlayback(now = Date.now()): QueueItem | undefined {

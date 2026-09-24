@@ -120,7 +120,11 @@ is backfilled for legacy rows on migration. An
 owner-rejected request does not mark the recording itself unplayable. Transient
 download errors and preparation timeouts keep an editorial or requested item
 queued for durable retries after 15 and 45 seconds, up to three claims; only then
-is it failed and a request owner notified. Unicode-normalized artist/song keys
+is it failed and a request owner notified. A catalog-verified song that fails
+candidate-specific media staging before queue insertion enters the same persistent quarantine;
+local cache/configuration failures do not quarantine the song;
+the planner tries another verified candidate without discarding the old ready run.
+Unicode-normalized artist/song keys
 block active and recent cross-catalog duplicates despite differing provider IDs.
 
 Provider, model, speech, and media work runs outside the serialized director mailbox.
