@@ -41,10 +41,12 @@ describe('private live MP3 output', () => {
         const server = await startHealthServer({} as RadioDirector, 0, live);
         const controllers = [new AbortController(), new AbortController()];
         try {
+            expect(live.health()).toEqual({ active: false, clients: 0 });
             const address = server.address();
             if (!address || typeof address === 'string') throw new Error('Expected a bound port');
             const url = `http://127.0.0.1:${address.port}/live.mp3`;
             live.start('music.wav', 'music');
+            expect(live.health()).toEqual({ active: true, clients: 0 });
             const first = await fetch(url, { signal: controllers[0]!.signal });
             expect(first.status).toBe(200);
             expect(first.headers.get('content-type')).toBe('audio/mpeg');
@@ -52,6 +54,8 @@ describe('private live MP3 output', () => {
             const firstChunk = firstReader.read();
             encoders[0]!.stdout.write(Buffer.from('first'));
             expect(Buffer.from((await firstChunk).value!).toString()).toBe('first');
+            expect(live.health()).toMatchObject({ active: true, clients: 1 });
+            expect(live.health().lastChunkAgeMs).toBeLessThan(1000);
 
             const second = await fetch(url, { signal: controllers[1]!.signal });
             const secondReader = second.body!.getReader();
@@ -75,6 +79,7 @@ describe('private live MP3 output', () => {
             controllers.forEach(controller => controller.abort());
             live.close();
             await close(server);
+            expect(live.health()).toEqual({ active: false, clients: 0 });
         }
     });
 

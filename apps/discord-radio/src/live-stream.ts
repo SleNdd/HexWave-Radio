@@ -20,8 +20,17 @@ export class LiveMp3Stream {
     private encoder?: Encoder;
     private paused = false;
     private closed = false;
+    private lastChunkAt?: number;
 
     constructor(private readonly factory: EncoderFactory = ffmpegEncoder, private readonly maxClients = 16) {}
+
+    health(now = Date.now()): { active: boolean; clients: number; lastChunkAgeMs?: number } {
+        return {
+            active: this.encoder !== undefined,
+            clients: this.clients.size,
+            ...(this.encoder && this.lastChunkAt !== undefined ? { lastChunkAgeMs: Math.max(0, now - this.lastChunkAt) } : {}),
+        };
+    }
 
     attach(request: IncomingMessage, response: ServerResponse): void {
         if (request.method !== 'GET') { response.writeHead(405, { allow: 'GET' }).end(); return; }
@@ -43,8 +52,10 @@ export class LiveMp3Stream {
             const encoder = this.factory(path, kind === 'speech' ? 1.1 : 0.38);
             this.encoder = encoder;
             this.paused = false;
+            this.lastChunkAt = undefined;
             encoder.stdout.on('data', (chunk: Buffer) => {
                 if (this.encoder !== encoder) return;
+                this.lastChunkAt = Date.now();
                 for (const client of this.clients) {
                     if (!client.write(chunk)) {
                         this.clients.delete(client);
@@ -55,6 +66,7 @@ export class LiveMp3Stream {
             encoder.once('error', () => {
                 if (this.encoder === encoder) {
                     this.encoder = undefined;
+                    this.lastChunkAt = undefined;
                     this.dropClients();
                     console.warn(JSON.stringify({ level: 'warn', event: 'live_stream.encoder_failed' }));
                 }
@@ -62,6 +74,7 @@ export class LiveMp3Stream {
             encoder.once('close', (code: number | null) => {
                 if (this.encoder === encoder) {
                     this.encoder = undefined;
+                    this.lastChunkAt = undefined;
                     if (code !== 0) {
                         this.dropClients();
                         console.warn(JSON.stringify({ level: 'warn', event: 'live_stream.encoder_failed' }));
@@ -88,6 +101,7 @@ export class LiveMp3Stream {
     stop(): void {
         const encoder = this.encoder;
         this.encoder = undefined;
+        this.lastChunkAt = undefined;
         if (this.paused) encoder?.kill('SIGCONT');
         this.paused = false;
         encoder?.kill();

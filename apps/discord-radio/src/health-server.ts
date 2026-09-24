@@ -22,7 +22,8 @@ export async function startHealthServer(director: RadioDirector, port: number, l
                     (status.readyTracks ?? 0) === 0;
                 const ok = status.mode !== 'stopped' && status.mode !== 'degraded' && !empty;
                 response.writeHead(ok ? 200 : 503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-                response.end(JSON.stringify({ ok, mode: status.mode, queued: status.queued, readyTracks: status.readyTracks, outputs: status.outputs }));
+                response.end(JSON.stringify({ ok, mode: status.mode, queued: status.queued, readyTracks: status.readyTracks, outputs: status.outputs,
+                    ...(liveStream ? { live: liveStream.health() } : {}) }));
             })
             .catch(error => {
                 response.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });

@@ -39,6 +39,12 @@ put an authenticated HTTPS reverse proxy or private VPN in front of the
 loopback endpoint. Public distribution needs a separate music-rights and
 capacity review.
 
+When the MP3 output is enabled, `/health` includes `live.active`,
+`live.clients` and (after the first packet) `live.lastChunkAgeMs`.
+These diagnostics do not change the overall HTTP status: a failed optional
+encoder must not restart an otherwise healthy Discord station. A growing
+packet age while the station is playing and unpaused is a live-output incident.
+
 For an audio-transport soak on the server, run
 `node scripts/monitor-live-stream.mjs 86400 var/log/live-stream-soak.jsonl`.
 It records only timestamps, byte counts, stalls, reconnects and inter-packet
