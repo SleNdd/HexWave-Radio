@@ -1,8 +1,11 @@
+import asyncio
 import urllib.error
 
 import pytest
 
-from resolve import COOLDOWN_S, FORMAT, STORABLE_TYPES, ResolveError, Unavailable, _pick, _total_of, cooldowns, expiry_of, probe, whole_range
+import app as service
+import resolve as resolver
+from resolve import COOLDOWN_S, FORMAT, STORABLE_TYPES, ResolveError, Unavailable, _pick, _require_record_length, _total_of, cooldowns, expiry_of, probe, whole_range
 
 
 class _Response:
@@ -115,6 +118,54 @@ class TestPick:
             _pick({"requested_downloads": [{"vcodec": "none", "acodec": "opus"}]})
 
 
+class TestMusicRecordBoundary:
+    @pytest.mark.parametrize("info", [
+        {"duration": 180, "is_live": True},
+        {"duration": 180, "live_status": "is_live"},
+        {"duration": 180, "live_status": "was_live"},
+        {"duration": 9},
+        {"duration": 1801},
+    ])
+    def test_permanently_refuses_live_or_out_of_range_duration(self, info):
+        with pytest.raises(Unavailable):
+            _require_record_length(info)
+
+    @pytest.mark.parametrize("duration", [None, float("nan"), float("inf"), True])
+    def test_incomplete_metadata_is_retryable(self, duration):
+        with pytest.raises(ResolveError) as raised:
+            _require_record_length({"duration": duration})
+        assert raised.value.code == "upstream"
+
+    def test_accepts_song_length(self):
+        assert _require_record_length({"duration": 180, "live_status": "not_live"}) == 180
+
+    def test_missing_duration_never_reaches_media_probe_and_maps_to_retryable_http(self, monkeypatch):
+        class FakeYDL:
+            def __init__(self, _options):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download=False):
+                return {"duration": None, "requested_downloads": [{"url": "https://x", "vcodec": "none", "acodec": "mp4a"}]}
+
+        monkeypatch.setattr(resolver.yt_dlp, "YoutubeDL", FakeYDL)
+
+        def unexpected_probe(_url):
+            pytest.fail("media probe must not run for incomplete metadata")
+
+        monkeypatch.setattr(resolver, "probe", unexpected_probe)
+        with pytest.raises(ResolveError) as raised:
+            resolver.resolve("abcdefghijk")
+        assert raised.value.code == "upstream"
+        response = asyncio.run(service.post_resolve(service.ResolveBody(videoId="abcdefghijk")))
+        assert response.status_code == 502
+
+
 class TestCooldowns:
     def test_a_refused_format_rests(self):
         cooldowns.penalise("251", now=0)
@@ -190,22 +241,17 @@ class TestHowAFailureReads:
 
 
 class TestTheStoreContract:
-    """The resolver may only answer with what the station's track store keeps.
-
-    `STORABLE_TYPES` mirrors `TRACK_SOURCE_TYPES` in
-    apps/api/src/modules/playout/audio/track.store.ts by hand, across a language
-    boundary. This reads that file, so the mirror cannot drift without a red test.
-    """
+    """The resolver may only answer with types accepted by the Discord adapter."""
 
     def _store_types(self):
         import pathlib
         import re
 
-        store = pathlib.Path(__file__).resolve().parent.parent / "apps/api/src/modules/playout/audio/track.store.ts"
+        store = pathlib.Path(__file__).resolve().parent.parent / "apps/discord-radio/src/providers.ts"
         text = store.read_text()
-        block = text[text.index("TRACK_SOURCE_TYPES"):]
-        block = block[: block.index("};")]
-        return set(re.findall(r"'([a-z]+/[a-z0-9.+-]+)'\s*:", block))
+        block = text[text.index("const YTMUSIC_AUDIO_MIME_TYPES"):]
+        block = block[: block.index("];")]
+        return set(re.findall(r"'([a-z]+/[a-z0-9.+-]+)'", block))
 
     def test_the_mirror_matches_the_store(self):
         assert set(STORABLE_TYPES) == self._store_types()

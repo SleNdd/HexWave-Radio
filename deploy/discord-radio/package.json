@@ -1,0 +1,16 @@
+{
+  "name": "hexwave-radio-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@discordjs/voice": "0.19.2",
+    "discord.js": "14.27.0",
+    "opusscript": "0.0.8",
+    "youtubei.js": "18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "typescript": "6.0.3"
+  }
+}

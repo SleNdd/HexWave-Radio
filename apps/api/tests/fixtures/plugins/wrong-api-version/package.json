@@ -1,8 +1,0 @@
-{
-    "name": "test-fixture-wrong-api-version",
-    "private": true,
-    "type": "module",
-    "deadair": {
-        "plugin": "entry.js"
-    }
-}

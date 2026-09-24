@@ -1,52 +1,13 @@
 packages:
-    - apps/*
-    - packages/*
-    - plugins/*
+  - apps/discord-radio
+  - packages/config-eslint
+  - packages/config-typescript
 
 allowBuilds:
-    '@swc/core': true
-    cbor-extract: true
-    # Pulled in by the site's Docusaurus. Its postinstall prints a funding banner and builds nothing.
-    core-js: false
-    esbuild: true
-    protobufjs: true
+  '@discordjs/opus': false
+  '@swc/core': true
+  cbor-extract: false
+  esbuild: true
+  protobufjs: true
 
-minimumReleaseAgeExclude:
-    - injectkit
-    - '@maroonedsoftware/*'
-    - '@contractkit/*'
-
-# Transitive packages with a security advisory whose parent has no release that takes the fix. Each
-# names its parent, so it moves that one edge and nothing else, and each is deleted when the parent
-# catches up: an override outliving its reason pins a package nobody remembers pinning. A parent with
-# a fixed release gets bumped instead, and a range the parent already allows is a lockfile refresh.
-overrides:
-    # The website's dev server. Docusaurus 3.10 requires webpack-dev-server 5, which is on express 4,
-    # which pins qs to ~6.15. Never in the image.
-    'express@4>qs': ^6.16.0
-    # Same dev server. sockjs is unmaintained at 0.3.24 and only ever calls `v4()`, which the advisory
-    # (v3, v5 and v6 writing into a caller's buffer) does not touch, and which uuid 11 still exports to
-    # `require`. Never in the image.
-    'sockjs>uuid': ^11.1.1
-    # The website's production build. Docusaurus 3.10's bundler pins these two plugins a major behind
-    # the releases that take serialize-javascript 7, which is the same CommonJS function on Node 20+.
-    # Never in the image.
-    'copy-webpack-plugin@11>serialize-javascript': ^7.0.5
-    'css-minimizer-webpack-plugin@5>serialize-javascript': ^7.0.5
-    # The build of every package and plugin. tsup 8.5.1 is the latest and still asks for ^0.27, and
-    # the advisory is esbuild's own dev server on Windows, which nothing here runs. Vite and the rest
-    # already allow 0.28. The image strips tsup and esbuild with the rest of the dev half.
-    'tsup>esbuild': ^0.28.1
-    # IN THE IMAGE, under plugin-llm. The AI SDK's v5 line pins undici ^5.29.0 and 5.29.0 is the last
-    # 5.x; the fix is v6 (undici ^6.28.0), which is a migration of the plugin rather than a bump. The
-    # SDK loads this copy only for its download helper, which fetches a file or image URL a model
-    # cannot take directly. Every provider here is handed `hostFetch(host)` and the station sends
-    # text, so it is not on the station's path, but it is in the image. It uses `Agent` with a
-    # `connect.lookup` and `fetch` with a `dispatcher`, both unchanged in 6. Delete with the move to v6.
-    '@ai-sdk/provider-utils@3>undici': ^6.28.1
-
-confirmModulesPurge: false
-
-# See the workspace CLAUDE.md: pnpm's pre-run dependency check misfires in sandboxed
-# sessions (project-local .pnpm-store path drift). Warn instead of trying to reinstall.
 verifyDepsBeforeRun: warn

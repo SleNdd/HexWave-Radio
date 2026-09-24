@@ -1,0 +1,90 @@
+name: hexwave-radio
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  radio:
+    build:
+      context: ../..
+      dockerfile: deploy/discord-radio/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      RADIO_DB_PATH: /app/var/data/discord-radio.sqlite
+      RADIO_CACHE_DIR: /app/var/cache/media
+      RADIO_HEALTH_PORT: 9380
+      YTAUDIO_BASE_URL: http://ytaudio:9322
+    volumes:
+      - ../../var/data:/app/var/data
+      - ../../var/cache:/app/var/cache
+      - radio-tts-cache:/app/var/cache/tts
+    depends_on:
+      ytaudio:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:9380:9380
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:9380/health', { signal: AbortSignal.timeout(2000) }).then(response => process.exit(response.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+
+  ytaudio:
+    build:
+      context: ../..
+      dockerfile: ytaudio/Dockerfile
+    restart: unless-stopped
+    environment:
+      YTAUDIO_PORT: 9322
+      YTAUDIO_WORKERS: 2
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9322/health', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+
+  spotify-shim:
+    profiles: [spotify]
+    build:
+      context: ../..
+      dockerfile: deploy/discord-radio/spotify-shim.Dockerfile
+      args:
+        GO_LIBRESPOT_VERSION: v0.7.4
+    restart: unless-stopped
+    environment:
+      SHIM_ADDR: :3679
+      SHIM_CREDENTIALS: /streamstate/spotify-credentials.json
+      PLAYOUT_BRIDGE_SECRET: ${PLAYOUT_BRIDGE_SECRET:-}
+      SPOTIFY_SHIM_SECRET: ${SPOTIFY_SHIM_SECRET:-}
+    volumes:
+      - spotify-state:/streamstate
+    ports:
+      - 127.0.0.1:3679:3679
+    logging: *default-logging
+
+  tts:
+    profiles: [tts]
+    build:
+      context: tts-bridge
+      dockerfile: RHVoice.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: tts-bridge/.env
+        required: false
+    volumes:
+      - ${TTS_RUNTIME_PATH:-./runtime/tts}:/runtime:ro
+    logging: *default-logging
+
+volumes:
+  spotify-state:
+  radio-tts-cache:

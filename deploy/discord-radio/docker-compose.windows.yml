@@ -1,0 +1,10 @@
+# Docker Desktop on Windows: keep SQLite and its WAL files on one Linux volume.
+# Use together with docker-compose.yml; media cache remains a rebuildable bind mount.
+services:
+  radio:
+    volumes:
+      - radio-data:/app/var/data
+      - ../../var/cache:/app/var/cache
+
+volumes:
+  radio-data:

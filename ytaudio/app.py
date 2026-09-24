@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from resolve import ResolveError, Unavailable, resolve
 
-app = FastAPI(title="deadair ytaudio", docs_url=None, redoc_url=None)
+app = FastAPI(title="HexWave Radio ytaudio", docs_url=None, redoc_url=None)
 
 # yt-dlp is synchronous and spends its time waiting on the network. A small pool
 # keeps one slow resolve from stalling the others without letting the station
@@ -41,7 +41,7 @@ async def health() -> dict:
 
 
 #: How a resolver failure reads to the station. The station's own vocabulary is
-#: the plugin's business; these are the facts it maps from. `unavailable` is the
+#: the radio adapter's business; these are the facts it maps from. `unavailable` is the
 #: one that means "stop asking", and it is answered as 410 for the same reason the
 #: Spotify shim does: the caller writes the copy off rather than retrying.
 _STATUS = {

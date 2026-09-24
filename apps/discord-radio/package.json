@@ -1,0 +1,27 @@
+{
+    "name": "@hexwave/radio",
+    "version": "0.1.0",
+    "private": true,
+    "license": "MIT",
+    "type": "module",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "lint": "eslint .",
+        "format": "prettier --write . --ignore-path ../../.prettierignore",
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@discordjs/voice": "^0.19.0",
+        "discord.js": "^14.22.1",
+        "opusscript": "0.0.8",
+        "youtubei.js": "18.0.0"
+    },
+    "devDependencies": {
+        "@repo/config-eslint": "workspace:*",
+        "@repo/config-typescript": "workspace:*",
+        "vitest": "^4.1.11"
+    }
+}

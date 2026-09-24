@@ -1,60 +1,22 @@
-# Everything built is built inside the image, so nothing built outside it should ride along:
-# a `dist/` from the host is a different architecture's idea of the same code.
+.git
+.codex
+**/.env
+**/.env.*
+!**/.env.example
+var
+artifacts
+TTSSPEAKER
+deploy/discord-radio/runtime
 **/node_modules
 **/dist
-**/.turbo
-.docvol
-.git
-.github
-.tanstack
-**/.env
-**/*.log
-
-# The running station's own state, which is the developer's library and logs rather than anything
-# the image should contain. Without these the build context is whatever music is on this machine.
-**/media
-**/logs
-stream/music/*
-!stream/music/.gitkeep
-
-# The public website, which the image never builds and never serves. Its manifest stays, because the
-# install is `--frozen-lockfile` against a lockfile that names it as a member; everything else goes,
-# so that editing a page of the site does not invalidate the workspace copy and rebuild the station.
-# Its dependencies are all devDependencies for the same reason: the prod prune removes them.
-apps/site/*
-!apps/site/package.json
-
-# The three listener apps, the Stream Deck plugin and the SDKs generated for the three, none of which
-# the station runs. They reached
-# the image only through `COPY apps` and `COPY packages`, which made an Android-only commit rebuild
-# the JavaScript workspace in all three variants and shipped the Kotlin and C# sources inside it. On a
-# developer's machine the context also carried their build output, which is ignored by git and was
-# not ignored here: 2.6GB of MSBuild under `apps/desktop` and 400MB of Gradle under `apps/android`,
-# measured.
-#
-# Each app's manifest stays, for the site's reason above: it holds nothing but a name and a version
-# (it exists so changesets can number the app's releases), but it makes the app a workspace member,
-# and the lockfile the frozen install checks against names every member. The Stream Deck plugin's
-# manifest holds more than that, since it is a TypeScript package for real, but everything it names
-# is a devDependency, which the image's prod prune removes.
-apps/android/*
-!apps/android/package.json
-apps/desktop/*
-!apps/desktop/package.json
-apps/ios/*
-!apps/ios/package.json
-apps/streamdeck/*
-!apps/streamdeck/package.json
-packages/sdk-kotlin
-packages/sdk-csharp
-packages/sdk-swift
-
-# The tests, which the image has no way to run and no reason to hold. Every package keeps them in
-# a top-level `tests/` beside `src/`, and every build tsconfig includes `src` alone, so this costs
-# the build nothing and stops a test-only commit from invalidating the workspace copy.
-**/tests
-
-# The example plugin is built by CI and by whoever copies it, never by the image, and it sits outside
-# the workspace globs. Ignored so an edit to it does not invalidate the `COPY . .` the manifests stage
-# starts from.
-examples/
+**/coverage
+*.sqlite*
+*.db
+*.log
+*.jsonl
+*.wav
+*.mp3
+*.ogg
+*.opus
+*.pem
+*.key

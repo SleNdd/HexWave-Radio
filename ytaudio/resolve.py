@@ -7,19 +7,17 @@ as it does for every other provider. `app.py` is the HTTP surface; everything
 here is testable without one.
 
 **Why this is a separate process at all.** The thing that knows how to resolve a
-YouTube audio URL is yt-dlp, which is Python, and the plugin is Node running
-in-process inside the API. That is the whole reason, and it is the same reason
-`analysis/` is a separate process. No audio passes through here.
+YouTube audio URL is yt-dlp, which is Python, while the Discord radio is Node.
+No audio passes through here.
 
-**Why not do it in the plugin with an InnerTube client.** Measured 2026-09-17:
-every client identity `youtubei.js` offers answered SABR, with no plain URL on
-any format, for a signed-in session. yt-dlp finds rungs it does not, and keeps
-finding them, which is the entire value of depending on it rather than on a
-protocol implementation of our own. See discussion #49.
+**Why not resolve inside Node.** The catalog client does not reliably expose
+a directly fetchable audio URL for every record. yt-dlp maintains extraction
+separately from the station's music-only catalog validation.
 """
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import urllib.error
@@ -37,38 +35,20 @@ import yt_dlp
 #: music station, and it passes every check that asks whether the content type
 #: begins with `audio/`.
 #:
-#: m4a because of the second half, which was missed the first time. Plain
-#: `bestaudio` is itag 251, Opus in WebM, and `audio/webm` is not a type the
-#: station's track store accepts (`TRACK_SOURCE_TYPES` in
-#: apps/api/src/modules/playout/audio/track.store.ts). So a resolve that
-#: succeeded here was refused at download, failed four times and was benched --
-#: every record, silently, behind a URL that fetched perfectly. itag 140 (AAC,
-#: about 130k against Opus's 122k) is offered alongside it and the store keeps it
-#: as `m4a`.
+#: m4a because plain `bestaudio` is often Opus in WebM, which the Discord
+#: radio's YouTube Music adapter does not accept. itag 140 (AAC) is usually
+#: offered alongside it.
 #:
-#: No fallback to WebM when there is no m4a. The store would refuse it anyway, so
+#: No fallback to WebM when there is no m4a. The adapter would refuse it anyway, so
 #: falling back would only move the failure somewhere quieter.
 FORMAT = "bestaudio[ext=m4a][vcodec=none]"
 
-#: The content types this resolver may answer with: the audio half of what the
-#: station's track store accepts. A MIRROR of `TRACK_SOURCE_TYPES`, kept by hand
-#: because one side is Python and the other TypeScript -- which is exactly why it
-#: is checked at the probe, where a mismatch fails as a resolve error the operator
-#: can read rather than as a download the station quietly refuses.
+#: Mirror of YTMUSIC_AUDIO_MIME_TYPES in apps/discord-radio/src/providers.ts.
+#: The resolver must never hand back a type the Discord adapter will reject.
 STORABLE_TYPES = (
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/wav",
-    "audio/x-wav",
-    "audio/wave",
-    "audio/ogg",
-    "application/ogg",
-    "audio/vorbis",
-    "audio/flac",
-    "audio/x-flac",
     "audio/mp4",
     "audio/m4a",
-    "audio/x-m4a",
+    "audio/aac",
 )
 
 #: How long a format that refused us is left alone. Per FORMAT rather than per
@@ -86,8 +66,7 @@ DEFAULT_TTL_S = 30 * 60
 
 #: Content types that mean the upstream answered with a refusal rather than audio.
 #: A JSON error body served as 200 is otherwise handed to the player as a record,
-#: and Liquidsoap picks its decoder from the content type, so a wrong one fails as
-#: SILENCE rather than as an error. That is the worst failure shape available.
+#: and the player cannot treat it as audio. Reject the response here instead.
 _REFUSAL_TYPES = ("text/", "application/json", "application/xml", "text/xml")
 
 
@@ -282,6 +261,20 @@ def _pick(info: dict) -> dict:
     raise Unavailable("no audio-only format was offered for this record")
 
 
+def _require_record_length(info: dict) -> float:
+    """Reject live and out-of-bounds sources before probing a media URL."""
+    if info.get("is_live") or info.get("live_status") not in (None, "not_live"):
+        raise Unavailable("live broadcasts and archived streams are not music records")
+    duration = info.get("duration")
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+        raise ResolveError("upstream", "record duration metadata is missing or invalid")
+    if not math.isfinite(duration):
+        raise ResolveError("upstream", "record duration metadata is non-finite")
+    if duration < 10 or duration > 30 * 60:
+        raise Unavailable("record duration is outside the music-only range")
+    return duration
+
+
 def resolve(video_id: str, *, now: float | None = None) -> Resolved:
     """Where this record's audio is, or why it is not available.
 
@@ -323,6 +316,7 @@ def resolve(video_id: str, *, now: float | None = None) -> Resolved:
     if not info:
         raise Unavailable("the upstream returned nothing for this id")
 
+    duration = _require_record_length(info)
     chosen = _pick(info)
     itag = str(chosen.get("format_id") or "unknown")
     if cooldowns.resting(itag, now=now):
@@ -341,12 +335,11 @@ def resolve(video_id: str, *, now: float | None = None) -> Resolved:
     total = probed.total_bytes or chosen.get("filesize")
     fetchable = whole_range(media_url, int(total)) if total else media_url
 
-    duration = info.get("duration")
     return Resolved(
         url=fetchable,
         expires_at_ms=expiry_of(media_url, now=now),
         mime_type=probed.content_type,
         itag=itag,
-        duration_ms=int(duration * 1000) if isinstance(duration, (int, float)) else None,
+        duration_ms=int(duration * 1000),
         filesize=total or chosen.get("filesize_approx"),
     )

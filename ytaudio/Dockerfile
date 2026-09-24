@@ -1,5 +1,4 @@
-# The audio-url resolver, for the DEV stack. The production image builds the same
-# service into itself (root `Dockerfile`) and supervises it with s6.
+# The audio-url resolver runs as a separate HexWave Radio service.
 #
 # No ffmpeg and no native anything: this service resolves an address and never
 # decodes, downloads or transcodes a byte.
@@ -11,9 +10,7 @@ WORKDIR /srv
 COPY ytaudio/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The module list is the SECOND copy of the one in the root Dockerfile. A file
-# added here and not there builds clean and crash-loops in production while this
-# container is perfectly happy. Adding one means editing both.
+# Keep the resolver's runtime modules together in this image.
 COPY ytaudio/resolve.py ytaudio/app.py ./
 
 RUN useradd --system --uid 10002 ytaudio
