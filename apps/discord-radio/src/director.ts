@@ -791,24 +791,25 @@ export class RadioDirector {
             return { plan, recentPlayed, memory: this.store.showMemory(now), upcoming,
                 hostId: shift?.hostId, shiftId: shift?.id, shiftStartedAt: shift?.startedAt,
                 completedInPlan: this.store.completedEditorialSince(plan.createdAt),
-                editorialDepth: this.store.editorialPipelineCount(),
-                noReadySuccessor: !this.store.peekNextForPlayback() };
+                editorialDepth: this.store.editorialPipelineCount() };
         });
         const planner = this.runtimeOptions?.planner;
         const signalDue = this.replanVersion > this.appliedReplanVersion;
         const criticalReserve = snapshot.editorialDepth <= 2;
-        const lowReserveDue = criticalReserve || (snapshot.editorialDepth <= 4 &&
-            (this.editorialDepthHighWater === undefined || snapshot.editorialDepth < this.editorialDepthHighWater));
+        const reserveDropped = this.editorialDepthHighWater === undefined ||
+            snapshot.editorialDepth < this.editorialDepthHighWater;
+        const criticalReserveDue = criticalReserve && reserveDropped;
+        const lowReserveDue = snapshot.editorialDepth <= 4 && reserveDropped;
         if (this.editorialDepthHighWater !== undefined) {
             this.editorialDepthHighWater = Math.max(this.editorialDepthHighWater, snapshot.editorialDepth);
         } else if (snapshot.editorialDepth > 4) {
             this.editorialDepthHighWater = snapshot.editorialDepth;
         }
         const shiftDue = snapshot.shiftStartedAt !== undefined && snapshot.plan.createdAt < snapshot.shiftStartedAt;
-        const reviewDue = snapshot.plan.source === 'fallback' || signalDue || shiftDue ||
+        const reviewDue = snapshot.plan.source === 'fallback' || signalDue || shiftDue || this.showPlanRetryAt > 0 ||
             snapshot.completedInPlan >= 4 || lowReserveDue ||
             now - snapshot.plan.createdAt >= 20 * 60_000;
-        const minInterval = signalDue || shiftDue ? 0 : criticalReserve ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000;
+        const minInterval = signalDue || shiftDue ? 0 : criticalReserveDue ? 15_000 : lowReserveDue ? 60_000 : 5 * 60_000;
         const earliest = Math.max(this.showPlanRetryAt, this.lastShowPlanAttemptAt + minInterval,
             snapshot.plan.source === 'model' && !signalDue && !shiftDue && !lowReserveDue ? snapshot.plan.createdAt + 5 * 60_000 : 0);
         if (planner && reviewDue && !this.showPlanning && now >= earliest) {
@@ -822,10 +823,10 @@ export class RadioDirector {
                 memory: snapshot.memory,
                 upcoming: snapshot.upcoming,
             }, this.workAbort.signal))).then(async proposal => {
-                const staged = this.providers.length > 0 ? await this.stageEditorialPlan(proposal, snapshot.noReadySuccessor)
+                const staged = this.providers.length > 0 ? await this.stageEditorialPlan(proposal, criticalReserve)
                     : { tracks: [] as Array<{ track: Track; localPath: string }>, release: () => undefined };
                 try {
-                    const minimum = snapshot.noReadySuccessor ? 1 : 2;
+                    const minimum = criticalReserve ? 1 : 2;
                     if (this.providers.length > 0 && staged.tracks.length < minimum) throw new Error(`Could not prepare ${minimum} new show-plan tracks`);
                     const applied = await this.mailbox.run(() => {
                         if (this.isStopped() || this.replanVersion !== signalVersion ||

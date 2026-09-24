@@ -541,6 +541,48 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it('commits one fresh verified song promptly when only two editorial tracks remain', async () => {
+        const store = new RadioStore(':memory:', policy);
+        let now = 10_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        for (let index = 0; index < 2; index++) {
+            const id = store.enqueueEditorial({ ...found, id: `old-song-${index}`, artist: `Old Artist ${index}` });
+            expect(store.claimPreparation()?.id).toBe(id);
+            expect(store.markReady(id, `C:/cache/old-${index}.media`)).toBe(true);
+        }
+        const proposal = { theme: 'Срочный поворот', queries: [
+            'Test Unit — Night Circuit', 'Other One — Unavailable', 'Other Two — Missing',
+        ], requestRun: 'alternate' as const };
+        const nextTrack = { ...found, id: 'fresh-followup', artist: 'Fresh Artist', title: 'Followup Song' };
+        const followup = { ...proposal, theme: 'Следующий срочный блок',
+            queries: ['Fresh Artist — Followup Song', 'Another One — Unavailable', 'Another Two — Missing'] };
+        let planCalls = 0;
+        const planner = { proposeShowPlan: vi.fn(async () => planCalls++ === 0 ? proposal : followup) };
+        const search = vi.fn(async (query: string) => query === proposal.queries[0] ? [found]
+            : query === followup.queries[0] ? [nextTrack] : []);
+        const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider],
+            { materialize: async () => 'C:/cache/fresh.media' } as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner });
+        (radio as unknown as { ensurePrepared: () => Promise<void> }).ensurePrepared = async () => undefined;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe('Срочный поворот'));
+        expect(search).toHaveBeenCalledTimes(1);
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-song-0', found.id]);
+        now += 60_000;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        expect(planner.proposeShowPlan).toHaveBeenCalledOnce();
+        const first = store.nextForPlayback()!;
+        store.finishItem(first.id, now + 1_000);
+        now += 60_000;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(planner.proposeShowPlan).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe('Следующий срочный блок'));
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual([found.id, nextTrack.id]);
+        await radio.stop();
+        store.close();
+    });
+
     it('does not apply a show proposal made before a newly accepted listener signal', async () => {
         const store = new RadioStore(':memory:', policy);
         const deliveries: Array<(proposal: ShowPlanProposal) => void> = [];

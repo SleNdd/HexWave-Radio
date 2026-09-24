@@ -54,7 +54,7 @@ inserting random or fixed-genre music. New model proposals request eight to ten
 explicit `artist — title` searches; catalog results must match both metadata
 fields, allowing harmless apostrophe/comma spelling differences. The director
 stages up to eight playable candidates and atomically updates the future run when at least two
-new songs are ready, or one verified song when there is no ready successor. The plan
+new songs are ready, or one verified song when the editorial pipeline has fallen to two or fewer. The plan
 revision, listener-signal version and host shift must still match. A successful
 pivot keeps at most one old ready song as a continuity bridge; failed staging
 keeps the entire previous ready tail. Provider search also rechecks
