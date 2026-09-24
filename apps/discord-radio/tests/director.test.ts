@@ -568,6 +568,35 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
+    it.each([
+        ['resolver 502', new Error('YouTube Music resolve failed (502)')],
+        ['provider timeout', new DOMException('The operation was aborted due to timeout', 'TimeoutError')],
+    ])('skips a transient %s without quarantining the song or discarding the plan', async (_failure, transientError) => {
+        const store = new RadioStore(':memory:', policy);
+        const proposal = { theme: 'Резервный кандидат', queries: [
+            'Test Unit — Night Circuit', 'Fresh Artist — Fresh Song', 'Missing Artist — Lost Song',
+        ], requestRun: 'alternate' as const };
+        const fresh = { ...found, id: 'fresh-after-502', artist: 'Fresh Artist', title: 'Fresh Song' };
+        const search = vi.fn(async (query: string) => query === proposal.queries[0] ? [found]
+            : query === proposal.queries[1] ? [fresh] : []);
+        const materialize = vi.fn(async (track: Track) => {
+            if (track.id === found.id) throw transientError;
+            return 'C:/cache/fresh.media';
+        });
+        const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider],
+            { materialize } as unknown as MediaCache,
+            { health: () => [], stopAll: () => undefined } as unknown as OutputFanout,
+            undefined, [], undefined, 0, { planner: { proposeShowPlan: async () => proposal } });
+        (radio as unknown as { ensurePrepared: () => Promise<void> }).ensurePrepared = async () => undefined;
+        await (radio as unknown as { activeShowPlan(): Promise<ShowPlan> }).activeShowPlan();
+        await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe('Резервный кандидат'));
+        expect(materialize).toHaveBeenCalledTimes(2);
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual([fresh.id]);
+        expect(store.canQueueEditorial(found)).toBe(true);
+        await radio.stop();
+        store.close();
+    });
+
     it('does not quarantine a good candidate when the local cache cannot write', async () => {
         const store = new RadioStore(':memory:', policy);
         const proposal = { theme: 'Новый блок', queries: [

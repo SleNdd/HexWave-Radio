@@ -927,8 +927,11 @@ export class RadioDirector {
                     rejected.media++;
                     if (this.workAbort.signal.aborted) throw error;
                     const reason = error instanceof Error ? error.message : 'media preparation failed';
-                    if (!this.isCandidateMediaFailure(reason)) throw error;
-                    await this.mailbox.run(() => this.store.quarantineFailedCandidate(track, reason));
+                    if (this.isCandidateMediaFailure(reason)) {
+                        await this.mailbox.run(() => this.store.quarantineFailedCandidate(track, reason));
+                    } else if (!this.isTransientProviderFailure(error, reason)) {
+                        throw error;
+                    }
                     // Try another verified catalog track. The old ready run remains audible.
                 }
             }
@@ -1187,6 +1190,13 @@ export class RadioDirector {
 
     private isCandidateMediaFailure(reason: string): boolean {
         return /^(?:(?:YouTube Music (?:resolve|audio fetch)|Spotify (?:track lookup|audio fetch)) failed \((?:400|403|404|410|415|422)\)|YouTube Music resolver returned (?:no URL|a non-HTTPS URL|an untrusted media host|an expired URL)|(?:YouTube Music|Spotify shim) returned unsafe content type .+|Provider returned an empty track|Track exceeds cache item limit)$/u.test(reason);
+    }
+
+    private isTransientProviderFailure(error: unknown, reason: string): boolean {
+        return /^(?:YouTube Music (?:resolve|audio fetch)|Spotify (?:track lookup|audio fetch)) failed \((?:408|429|5\d\d)\)$/u.test(reason) ||
+            (error instanceof TypeError && /^(?:fetch failed|terminated)$/u.test(reason)) ||
+            (error instanceof Error && error.name === 'TimeoutError') ||
+            reason === 'Show-plan media preparation timed out';
     }
 
     private isOutputUnavailable(reason: string): boolean {
