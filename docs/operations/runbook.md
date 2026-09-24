@@ -39,6 +39,15 @@ put an authenticated HTTPS reverse proxy or private VPN in front of the
 loopback endpoint. Public distribution needs a separate music-rights and
 capacity review.
 
+For an audio-transport soak on the server, run
+`node scripts/monitor-live-stream.mjs 86400 var/log/live-stream-soak.jsonl`.
+It records only timestamps, byte counts, stalls, reconnects and inter-packet
+gaps over one day; it never saves audio or the URL. An interval over one second
+is logged, and five seconds without MP3 bytes triggers a reconnect. Run it
+alongside `scripts/soak-stats.ps1` and station event logs. Packet continuity
+does not prove the music sounds correct or that MP3 frames decode cleanly;
+listen to representative boundaries separately.
+
 Start with Docker Compose and wait for the application healthcheck before using commands.
 On Docker Desktop for Windows, add `-f deploy/discord-radio/docker-compose.windows.yml`
 to every Compose command. This keeps SQLite and its WAL on one Linux named volume;
