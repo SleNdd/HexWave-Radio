@@ -12,7 +12,12 @@ const policy = {
     requestCooldownMs: 0, requestTtlMs: 60_000, studioCooldownMs: 0,
     studioTtlMs: 60_000, trackCooldownMs: 0, artistCooldownMs: 0,
 };
-const output = { health: () => [], stopAll: () => undefined } as unknown as OutputFanout;
+const pendingPlays = new Set<() => void>();
+const output = {
+    health: () => [],
+    play: async () => await new Promise<void>(resolve => { pendingPlays.add(resolve); }),
+    stopAll: () => { for (const release of pendingPlays) release(); pendingPlays.clear(); },
+} as unknown as OutputFanout;
 const track: Track = { provider: 'ytmusic', id: 'abcdefghijk', title: 'Test Song', artist: 'Test Artist', durationMs: 180_000 };
 
 describe('organizer host rotation', () => {
@@ -23,6 +28,9 @@ describe('organizer host rotation', () => {
         const firstId = store.enqueueEditorial(track);
         expect(store.claimPreparation()?.id).toBe(firstId);
         expect(store.markReady(firstId, 'C:/cache/first.media')).toBe(true);
+        const secondId = store.enqueueEditorial({ ...track, id: 'nexttrack02', title: 'Next Song' });
+        expect(store.claimPreparation()?.id).toBe(secondId);
+        expect(store.markReady(secondId, 'C:/cache/second.media')).toBe(true);
         const kinds: string[] = [];
         const presenter = { prepare: async (context: BreakContext) => {
             kinds.push(context.kind);
@@ -37,15 +45,17 @@ describe('organizer host rotation', () => {
             expect(store.currentHostShift()?.introducedAt).toBeUndefined();
             expect(store.markHostIntroduced(shift.id)).toBe(true);
             expect(store.markHostIntroduced(shift.id)).toBe(false);
-            const playing = store.nextForPlayback();
-            expect(playing?.id).toBe(firstId);
+            expect(store.current()?.id).toBe(firstId);
+            const thirdId = store.enqueueEditorial({ ...track, id: 'nexttrack03', title: 'Third Song' });
+            expect(store.claimPreparation()?.id).toBe(thirdId);
+            expect(store.markReady(thirdId, 'C:/cache/third.media')).toBe(true);
             store.finishItem(firstId);
-            const secondId = store.enqueueEditorial({ ...track, id: 'nexttrack02', title: 'Next Song' });
-            expect(store.claimPreparation()?.id).toBe(secondId);
-            expect(store.markReady(secondId, 'C:/cache/second.media')).toBe(true);
+            store.nextForPlayback();
             await (radio as unknown as { prepareUpcomingBreak(count: number, durationMs: number): Promise<void> })
                 .prepareUpcomingBreak(0, track.durationMs);
-            expect(kinds).toEqual(['intro', 'station']);
+            expect(kinds[0]).toBe('intro');
+            expect(kinds.slice(1)).toContain('station');
+            expect(kinds.slice(1)).not.toContain('intro');
         } finally {
             await radio.stop();
             store.close();
@@ -108,6 +118,9 @@ describe('organizer host rotation', () => {
         const store = new RadioStore(':memory:', policy);
         const now = Date.now();
         store.startHostShift('sol', now + 80, now, null);
+        const bridgeId = store.enqueueEditorial({ ...track, id: 'bridge-track', title: 'Bridge' });
+        expect(store.claimPreparation()?.id).toBe(bridgeId);
+        expect(store.markReady(bridgeId, 'C:/cache/bridge.media')).toBe(true);
         const itemId = store.enqueueEditorial(track);
         expect(store.claimPreparation()?.id).toBe(itemId);
         expect(store.markReady(itemId, 'C:/cache/test.media')).toBe(true);
@@ -145,6 +158,9 @@ describe('organizer host rotation', () => {
         const store = new RadioStore(':memory:', policy);
         const now = Date.now();
         store.startHostShift('sol', now + 80, now - 180 * 60_000, null);
+        const bridgeId = store.enqueueEditorial({ ...track, id: 'bridge-track', title: 'Bridge' });
+        store.claimPreparation();
+        store.markReady(bridgeId, 'C:/cache/bridge.media');
         const itemId = store.enqueueEditorial(track);
         store.claimPreparation();
         store.markReady(itemId, 'C:/cache/test.media');

@@ -11,12 +11,11 @@ export async function startHealthServer(director: RadioDirector, port: number): 
         void director
             .status()
             .then(status => {
-                // The process can answer HTTP while the voice channel is silent.
-                // An exhausted queue with a connected output is an incident,
-                // not a healthy station.
-                const connectedButEmpty = status.mode !== 'paused' && status.mode !== 'playing' &&
-                    status.readyTracks === 0 && status.outputs.some(output => output.connected);
-                const ok = status.mode !== 'stopped' && !connectedButEmpty;
+                // The programme runs even with zero Discord subscribers. Empty
+                // running order is an incident regardless of connection state.
+                const empty = status.mode !== 'paused' && status.mode !== 'playing' &&
+                    (status.readyTracks ?? 0) === 0;
+                const ok = status.mode !== 'stopped' && status.mode !== 'degraded' && !empty;
                 response.writeHead(ok ? 200 : 503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
                 response.end(JSON.stringify({ ok, mode: status.mode, queued: status.queued, readyTracks: status.readyTracks, outputs: status.outputs }));
             })

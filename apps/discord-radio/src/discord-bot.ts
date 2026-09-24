@@ -86,12 +86,14 @@ export class DiscordRadioBot {
         const rest = new REST({ version: '10' }).setToken(this.config.discord.token);
         await this.awaitStartup(rest.put(Routes.applicationCommands(this.config.discord.clientId), { body: commandData }));
         this.restoreAbort.signal.throwIfAborted();
-        const login = this.client.login(this.config.discord.token);
-        // Discord's login cannot be cancelled. If it settles after stop(), close its late gateway.
-        void login.then(() => { if (this.restoreAbort.signal.aborted) this.client.destroy(); }, () => undefined);
-        await this.awaitStartup(login);
         if (!this.client.isReady()) {
-            await once(this.client, Events.ClientReady, { signal: AbortSignal.any([this.restoreAbort.signal, AbortSignal.timeout(20_000)]) });
+            const login = this.client.login(this.config.discord.token);
+            // Discord's login cannot be cancelled. If it settles after stop(), close its late gateway.
+            void login.then(() => { if (this.restoreAbort.signal.aborted) this.client.destroy(); }, () => undefined);
+            await this.awaitStartup(login);
+            if (!this.client.isReady()) {
+                await once(this.client, Events.ClientReady, { signal: AbortSignal.any([this.restoreAbort.signal, AbortSignal.timeout(20_000)]) });
+            }
         }
         this.restoreAbort.signal.throwIfAborted();
         await this.awaitStartup(this.restoreOutputs());

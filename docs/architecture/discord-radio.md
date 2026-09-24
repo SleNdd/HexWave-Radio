@@ -10,9 +10,9 @@ Discord commands -> RadioDirector -> SQLite running order
                          \                 /
                           cached playable audio
                                    |
-                         shared Discord AudioPlayer
-                                   |
-                         1..3 VoiceConnections
+                         shared station clock / AudioPlayer
+                              /               \
+                    0..3 VoiceConnections    planned HTTP live stream
 ```
 
 The compact app intentionally does not depend on private `apps/api` modules, Postgres,
@@ -116,6 +116,15 @@ context, not rejected by a hard duplicate filter.
 For each guild, track the last human presence in the connected voice channel.
 Three uninterrupted empty minutes disconnect only that guild output. Joining and
 leaving one output does not pause, duplicate, or restart the shared running order.
+`NoSubscriberBehavior.Play` drains the single player at real-time pace even when
+there are no voice connections. A late Discord subscription joins the current
+audio resource instead of starting a new item. The planned HTTP stream must tap
+this same programme at the output boundary; it must not own a separate queue or
+block the director on slow network clients.
+Runtime starts the director and health listener independently of Discord REST
+registration/login. A failed Discord startup retries in the background (401 is
+reported as a configuration failure); it cannot prevent the station clock from
+advancing. Shutdown cancels those retries before draining audio and SQLite.
 
 `track_quarantine` is separate from `play_items.state='failed'`: a terminal media
 failure suppresses reselection of that provider track for 15 minutes, or six hours

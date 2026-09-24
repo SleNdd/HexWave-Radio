@@ -46,6 +46,7 @@ describe('Discord output restoration', () => {
 
     it('closes a login that resolves after stop without restoring voice', async () => {
         const { bot, client, connectGuild } = setup();
+        vi.spyOn(client, 'isReady').mockReturnValue(false);
         let finishLogin!: (value: string) => void;
         vi.spyOn(client, 'login').mockReturnValue(new Promise(resolve => { finishLogin = resolve; }));
         const destroy = vi.spyOn(client, 'destroy');

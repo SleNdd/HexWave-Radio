@@ -36,17 +36,30 @@ describe('health server startup', () => {
         }
     });
 
-    it('waits until the port is listening and rejects an occupied port', async () => {
+    it('reports an empty station as unhealthy even without Discord subscribers', async () => {
         const director = {
-            status: async () => ({ mode: 'starting', queued: 0, outputs: [] }),
+            status: async () => ({ mode: 'starting', queued: 0, readyTracks: 0, outputs: [] }),
         } as unknown as RadioDirector;
         const server = await startHealthServer(director, 0);
         try {
             const address = server.address();
             if (!address || typeof address === 'string') throw new Error('Expected a bound TCP port');
             const response = await fetch(`http://127.0.0.1:${address.port}/health`);
-            expect(response.status).toBe(200);
+            expect(response.status).toBe(503);
             await expect(startHealthServer(director, address.port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+        } finally {
+            await new Promise<void>((resolve, reject) => server.close(error => (error ? reject(error) : resolve())));
+        }
+    });
+
+    it('reports a playing station as healthy without Discord subscribers', async () => {
+        const director = { status: async () => ({ mode: 'playing', queued: 1, readyTracks: 0, outputs: [] }) } as unknown as RadioDirector;
+        const server = await startHealthServer(director, 0);
+        try {
+            const address = server.address();
+            if (!address || typeof address === 'string') throw new Error('Expected a bound TCP port');
+            const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+            expect(response.status).toBe(200);
         } finally {
             await new Promise<void>((resolve, reject) => server.close(error => (error ? reject(error) : resolve())));
         }

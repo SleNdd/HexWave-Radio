@@ -1441,19 +1441,22 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
-    it('requeues a request when every Discord output disappears during playback', async () => {
+    it('keeps one programme advancing without subscribers and lets a guild join mid-track', async () => {
         const store = new RadioStore(':memory:', policy);
         store.addRequest({ guildId: 'g', userId: 'u', userName: 'User', track: found, now: Date.now() });
-        let healthChecks = 0;
+        let connected = false;
+        let finishPlayback!: () => void;
+        const playback = new Promise<void>(resolve => { finishPlayback = resolve; });
+        let plays = 0;
         const output: OutputFanout = {
-            connectGuild: async () => undefined,
-            play: async () => undefined,
+            connectGuild: async () => { connected = true; },
+            play: async () => { plays++; await playback; },
             pause: () => false,
             resume: () => false,
             skip: () => false,
-            stopGuild: () => undefined,
+            stopGuild: () => { connected = false; },
             stopAll: () => undefined,
-            health: () => [{ guildId: 'g', connected: healthChecks++ === 0 }],
+            health: () => connected ? [{ guildId: 'g', connected: true }] : [],
         };
         const cache = { materialize: async () => 'C:/cache/request.media' } as MediaCache;
         const provider: MusicProvider = {
@@ -1467,11 +1470,15 @@ describe('RadioDirector requests', () => {
         };
         const radio = new RadioDirector(store, [provider], cache, output);
         await radio.tick();
-        for (let attempt = 0; attempt < 20 && store.current(); attempt++) await delay(5);
-
-        expect(store.db.prepare('SELECT state FROM play_items WHERE id=1').get()).toMatchObject({ state: 'ready' });
-        expect(store.counts().pendingRequests).toBe(1);
-        expect(store.peekNextForPlayback()?.id).toBe(1);
+        await vi.waitFor(() => expect(plays).toBe(1));
+        expect(store.db.prepare('SELECT state FROM play_items WHERE id=1').get()).toMatchObject({ state: 'playing' });
+        await output.connectGuild('g', 'voice', {});
+        expect(plays).toBe(1);
+        output.stopGuild('g');
+        finishPlayback();
+        await vi.waitFor(() => expect(store.db.prepare('SELECT state FROM play_items WHERE id=1').get())
+            .toMatchObject({ state: 'played' }));
+        expect(store.counts().pendingRequests).toBe(0);
         store.close();
     });
 });

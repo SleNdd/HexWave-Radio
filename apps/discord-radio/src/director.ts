@@ -279,10 +279,6 @@ export class RadioDirector {
                 await this.waitForAnyReady(preparation);
             }
             if (this.isStopped()) return;
-            if (!this.output.health().some(output => output.connected)) {
-                this.mode = 'starting';
-                return;
-            }
             await this.rotateHostIfDue();
             const hostShift = await this.mailbox.run(() => this.store.currentHostShift());
             const upcoming = await this.mailbox.run(() => this.store.peekNextForPlayback());
@@ -421,13 +417,6 @@ export class RadioDirector {
                     await this.skipAndNotify(item.id);
                     return;
                 }
-                if (!this.output.health().some(output => output.connected)) {
-                    const reason = 'All Discord voice outputs disconnected during playback';
-                    await this.mailbox.run(() => this.store.requeuePlaying(item.id, reason));
-                    this.lastError = reason;
-                    if (this.running) this.mode = 'starting';
-                    return;
-                }
                 if (aired) {
                     if (preparedBreak.segmentId !== undefined) {
                         segmentFinalized = await this.mailbox.run(() => this.store.markHostSegmentPlayed(preparedBreak.segmentId!,
@@ -477,13 +466,6 @@ export class RadioDirector {
                     this.backgroundJobs.add(hostJob);
                     void hostJob.then(() => this.backgroundJobs.delete(hostJob));
                     await playback;
-                    if (!this.output.health().some(output => output.connected)) {
-                        const reason = 'All Discord voice outputs disconnected during playback';
-                        await this.mailbox.run(() => this.store.requeuePlaying(item.id, reason));
-                        this.lastError = reason;
-                        if (this.running) this.mode = 'starting';
-                        break;
-                    }
                     await this.mailbox.run(() => this.store.finishItem(item.id));
                     logPlayout('radio.track.completed', item.id);
                     completed = true;

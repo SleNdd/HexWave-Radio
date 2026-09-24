@@ -1,14 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { VoiceConnectionStatus, entersState, joinVoiceChannel, type VoiceConnection } from '@discordjs/voice';
+import { NoSubscriberBehavior, VoiceConnectionStatus, createAudioPlayer, entersState, joinVoiceChannel, type VoiceConnection } from '@discordjs/voice';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DiscordOutputFanout } from '../src/discord-fanout.js';
 
 vi.mock('@discordjs/voice', async importOriginal => {
     const actual = await importOriginal<typeof import('@discordjs/voice')>();
-    return { ...actual, joinVoiceChannel: vi.fn(), entersState: vi.fn() };
+    return { ...actual, createAudioPlayer: vi.fn(actual.createAudioPlayer), joinVoiceChannel: vi.fn(), entersState: vi.fn() };
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -16,38 +16,30 @@ afterEach(() => vi.clearAllMocks());
 type FanoutInternals = {
     connections: Map<string, VoiceConnection>;
     active?: { reject: (error: Error) => void };
-    abortPlaybackWithoutOutputs: () => void;
 };
 
 function connection(status: VoiceConnectionStatus, channelId: string | null = null): VoiceConnection {
     return Object.assign(new EventEmitter(), { state: { status }, joinConfig: { channelId }, destroy: vi.fn(), subscribe: vi.fn() }) as unknown as VoiceConnection;
 }
 
-describe('DiscordOutputFanout ready-output guards', () => {
-    it('does not start a track when only non-ready connections remain', async () => {
+describe('DiscordOutputFanout shared programme', () => {
+    it('keeps the audio player advancing without Discord subscribers', () => {
         const fanout = new DiscordOutputFanout();
-        const internals = fanout as unknown as FanoutInternals;
-        internals.connections.set('guild', connection(VoiceConnectionStatus.Connecting));
-
-        await expect(fanout.play('C:/cache/track.media')).rejects.toThrow('No Discord voice outputs are connected');
+        expect(vi.mocked(createAudioPlayer)).toHaveBeenCalledWith({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
         fanout.stopAll();
     });
 
-    it('aborts an active track when every connection loses ready state', () => {
+    it('does not abort an active programme when the last guild leaves', () => {
         const fanout = new DiscordOutputFanout();
         const internals = fanout as unknown as FanoutInternals;
         const output = connection(VoiceConnectionStatus.Ready);
         internals.connections.set('guild', output);
         const reject = vi.fn();
         internals.active = { reject };
-
-        internals.abortPlaybackWithoutOutputs();
+        fanout.stopGuild('guild');
         expect(reject).not.toHaveBeenCalled();
-
-        (output.state as { status: VoiceConnectionStatus }).status = VoiceConnectionStatus.Disconnected;
-        internals.abortPlaybackWithoutOutputs();
-        expect(reject).toHaveBeenCalledOnce();
-        expect(reject.mock.calls[0]?.[0]).toHaveProperty('message', 'All Discord voice outputs disconnected during playback');
+        expect(fanout.health()).toEqual([]);
+        internals.active = undefined;
         fanout.stopAll();
     });
 

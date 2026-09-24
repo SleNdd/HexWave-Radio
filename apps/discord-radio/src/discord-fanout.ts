@@ -15,6 +15,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { OutputFanout, OutputHealth } from './contracts.js';
 
 export class DiscordOutputFanout implements OutputFanout {
+    // The station clock is this player, not the set of Discord subscribers.
+    // A guild joining mid-song subscribes to the position already on air.
     private readonly player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
     private readonly connections = new Map<string, VoiceConnection>();
     private readonly desired = new Map<string, { channelId: string; adapterCreator: unknown }>();
@@ -63,7 +65,6 @@ export class DiscordOutputFanout implements OutputFanout {
         connection.subscribe(this.player);
         connection.on(VoiceConnectionStatus.Disconnected, () => {
             if (this.connections.get(guildId) !== connection) return;
-            this.abortPlaybackWithoutOutputs();
             void Promise.race([
                 entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
                 entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
@@ -80,7 +81,6 @@ export class DiscordOutputFanout implements OutputFanout {
             connection.destroy();
             if (this.connections.get(guildId) === connection) {
                 this.connections.delete(guildId);
-                if (!previous) this.abortPlaybackWithoutOutputs();
             }
             throw error;
         }
@@ -102,7 +102,6 @@ export class DiscordOutputFanout implements OutputFanout {
 
     async play(localPath: string, options?: { kind: 'speech' }): Promise<void> {
         if (this.active) throw new Error('AudioPlayer already has an active item');
-        if (!this.hasReadyOutput()) throw new Error('No Discord voice outputs are connected');
         this.skipped = false;
         const resource = createAudioResource(localPath, { inputType: StreamType.Arbitrary, inlineVolume: true });
         // Loud masters dominate even peak-limited speech; keep the shared
@@ -153,7 +152,6 @@ export class DiscordOutputFanout implements OutputFanout {
         if (!connection) return;
         connection.destroy();
         this.connections.delete(guildId);
-        this.abortPlaybackWithoutOutputs();
     }
 
     stopAll(): void {
@@ -203,13 +201,4 @@ export class DiscordOutputFanout implements OutputFanout {
         }
     }
 
-    private abortPlaybackWithoutOutputs(): void {
-        if (this.hasReadyOutput() || !this.active) return;
-        this.active.reject(new Error('All Discord voice outputs disconnected during playback'));
-        this.player.stop(true);
-    }
-
-    private hasReadyOutput(): boolean {
-        return [...this.connections.values()].some(connection => connection.state.status === VoiceConnectionStatus.Ready);
-    }
 }
