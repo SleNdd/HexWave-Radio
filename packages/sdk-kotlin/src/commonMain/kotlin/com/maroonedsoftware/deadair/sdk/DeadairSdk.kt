@@ -13,6 +13,7 @@ import com.maroonedsoftware.deadair.sdk.clients.ChartsClient
 import com.maroonedsoftware.deadair.sdk.clients.ClockClient
 import com.maroonedsoftware.deadair.sdk.clients.DirectorClient
 import com.maroonedsoftware.deadair.sdk.clients.HistoryClient
+import com.maroonedsoftware.deadair.sdk.clients.MessagingClient
 import com.maroonedsoftware.deadair.sdk.clients.NarrationsClient
 import com.maroonedsoftware.deadair.sdk.clients.NewsClient
 import com.maroonedsoftware.deadair.sdk.clients.NowplayingClient
@@ -26,6 +27,7 @@ import com.maroonedsoftware.deadair.sdk.clients.PluginsClient
 import com.maroonedsoftware.deadair.sdk.clients.PodcastsClient
 import com.maroonedsoftware.deadair.sdk.clients.ProductionsClient
 import com.maroonedsoftware.deadair.sdk.clients.RenderClient
+import com.maroonedsoftware.deadair.sdk.clients.RequestsClient
 import com.maroonedsoftware.deadair.sdk.clients.ScheduleClient
 import com.maroonedsoftware.deadair.sdk.clients.SettingsClient
 import com.maroonedsoftware.deadair.sdk.clients.LogsClient
@@ -57,6 +59,7 @@ class DeadairSdk(config: SdkConfig) : AutoCloseable {
     val clock: ClockClient = ClockClient(http)
     val director: DirectorClient = DirectorClient(http)
     val history: HistoryClient = HistoryClient(http)
+    val messaging: MessagingClient = MessagingClient(http)
     val narrations: NarrationsClient = NarrationsClient(http)
     val news: NewsClient = NewsClient(http)
     val nowplaying: NowplayingClient = NowplayingClient(http)
@@ -70,6 +73,7 @@ class DeadairSdk(config: SdkConfig) : AutoCloseable {
     val podcasts: PodcastsClient = PodcastsClient(http)
     val productions: ProductionsClient = ProductionsClient(http)
     val render: RenderClient = RenderClient(http)
+    val requests: RequestsClient = RequestsClient(http)
     val schedule: ScheduleClient = ScheduleClient(http)
     val settings: SettingsClient = SettingsClient(http)
     val logs: LogsClient = LogsClient(http)

@@ -7,6 +7,7 @@ import { CatalogClient } from './catalog/catalog.client.js';
 import { ChartsClient } from './charts/charts.client.js';
 import { DirectorClient } from './director/director.client.js';
 import { HistoryClient } from './history/history.client.js';
+import { MessagingClient } from './messaging/messaging.client.js';
 import { NarrationsClient } from './narrations/narrations.client.js';
 import { NewsClient } from './news/news.client.js';
 import { NowplayingClient } from './nowplaying/nowplaying.client.js';
@@ -19,6 +20,7 @@ import { PluginsClient } from './plugins/plugins.client.js';
 import { PodcastsClient } from './podcasts/podcasts.client.js';
 import { ProductionsClient } from './productions/productions.client.js';
 import { RenderClient } from './render/render.client.js';
+import { RequestsClient } from './requests/requests.client.js';
 import { ScheduleClient } from './schedule/schedule.client.js';
 import { SettingsClient } from './settings/settings.client.js';
 import { StationClient } from './station/station.client.js';
@@ -34,6 +36,7 @@ export class DeadairSdk {
     readonly charts: ChartsClient;
     readonly director: DirectorClient;
     readonly history: HistoryClient;
+    readonly messaging: MessagingClient;
     readonly narrations: NarrationsClient;
     readonly news: NewsClient;
     readonly nowplaying: NowplayingClient;
@@ -46,6 +49,7 @@ export class DeadairSdk {
     readonly podcasts: PodcastsClient;
     readonly productions: ProductionsClient;
     readonly render: RenderClient;
+    readonly requests: RequestsClient;
     readonly schedule: ScheduleClient;
     readonly settings: SettingsClient;
     readonly station: StationClient;
@@ -62,6 +66,7 @@ export class DeadairSdk {
         this.charts = new ChartsClient(sdkFetch);
         this.director = new DirectorClient(sdkFetch);
         this.history = new HistoryClient(sdkFetch);
+        this.messaging = new MessagingClient(sdkFetch);
         this.narrations = new NarrationsClient(sdkFetch);
         this.news = new NewsClient(sdkFetch);
         this.nowplaying = new NowplayingClient(sdkFetch);
@@ -74,6 +79,7 @@ export class DeadairSdk {
         this.podcasts = new PodcastsClient(sdkFetch);
         this.productions = new ProductionsClient(sdkFetch);
         this.render = new RenderClient(sdkFetch);
+        this.requests = new RequestsClient(sdkFetch);
         this.schedule = new ScheduleClient(sdkFetch);
         this.settings = new SettingsClient(sdkFetch);
         this.station = new StationClient(sdkFetch);

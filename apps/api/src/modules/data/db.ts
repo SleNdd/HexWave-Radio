@@ -297,6 +297,29 @@ export interface DeadairHiddenPlaylists {
   stationKey: Generated<string>;
 }
 
+export interface DeadairListenerRequests {
+  actorId: string | null;
+  airedAt: DateTime | null;
+  artist: string;
+  chatId: string | null;
+  chatKind: "direct" | "group" | null;
+  createdAt: Generated<DateTime>;
+  decidedAt: DateTime | null;
+  dedicateTo: string | null;
+  id: Generated<string>;
+  message: string | null;
+  messageId: string | null;
+  pluginId: string | null;
+  reason: string | null;
+  requesterKey: string;
+  requesterName: string;
+  stationKey: Generated<string>;
+  status: Generated<"waiting" | "pending" | "queued" | "aired" | "declined" | "expired">;
+  title: string;
+  trackId: string;
+  updatedAt: Generated<DateTime>;
+}
+
 export interface DeadairLoginEvents {
   actorId: string;
   factorId: string | null;
@@ -319,6 +342,27 @@ export interface DeadairLoginFailureCounters {
   ip: string;
   lastReason: string | null;
   lastSeenAt: Generated<DateTime>;
+}
+
+export interface DeadairMessagingCursors {
+  cursor: string;
+  pluginId: string;
+  updatedAt: Generated<DateTime>;
+}
+
+export interface DeadairMessagingIdentities {
+  actorId: string;
+  createdAt: Generated<DateTime>;
+  displayName: string;
+  platformUserId: string;
+  pluginId: string;
+}
+
+export interface DeadairMessagingLinkCodes {
+  actorId: string;
+  codeHash: string;
+  createdAt: Generated<DateTime>;
+  expiresAt: DateTime;
 }
 
 export interface DeadairNarrationPieces {
@@ -1000,8 +1044,12 @@ export interface DB {
   "deadair.factExtractions": DeadairFactExtractions;
   "deadair.facts": DeadairFacts;
   "deadair.hiddenPlaylists": DeadairHiddenPlaylists;
+  "deadair.listenerRequests": DeadairListenerRequests;
   "deadair.loginEvents": DeadairLoginEvents;
   "deadair.loginFailureCounters": DeadairLoginFailureCounters;
+  "deadair.messagingCursors": DeadairMessagingCursors;
+  "deadair.messagingIdentities": DeadairMessagingIdentities;
+  "deadair.messagingLinkCodes": DeadairMessagingLinkCodes;
   "deadair.narrationPieces": DeadairNarrationPieces;
   "deadair.oauthClients": DeadairOauthClients;
   "deadair.oauthGrants": DeadairOauthGrants;

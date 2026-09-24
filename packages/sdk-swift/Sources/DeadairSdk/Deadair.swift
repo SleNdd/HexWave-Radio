@@ -18,6 +18,7 @@ public final class Deadair: Sendable {
     public let clock: ClockClient
     public let director: DirectorClient
     public let history: HistoryClient
+    public let messaging: MessagingClient
     public let narrations: NarrationsClient
     public let news: NewsClient
     public let nowplaying: NowplayingClient
@@ -31,6 +32,7 @@ public final class Deadair: Sendable {
     public let podcasts: PodcastsClient
     public let productions: ProductionsClient
     public let render: RenderClient
+    public let requests: RequestsClient
     public let schedule: ScheduleClient
     public let settings: SettingsClient
     public let logs: LogsClient
@@ -55,6 +57,7 @@ public final class Deadair: Sendable {
         self.clock = ClockClient(http: http)
         self.director = DirectorClient(http: http)
         self.history = HistoryClient(http: http)
+        self.messaging = MessagingClient(http: http)
         self.narrations = NarrationsClient(http: http)
         self.news = NewsClient(http: http)
         self.nowplaying = NowplayingClient(http: http)
@@ -68,6 +71,7 @@ public final class Deadair: Sendable {
         self.podcasts = PodcastsClient(http: http)
         self.productions = ProductionsClient(http: http)
         self.render = RenderClient(http: http)
+        self.requests = RequestsClient(http: http)
         self.schedule = ScheduleClient(http: http)
         self.settings = SettingsClient(http: http)
         self.logs = LogsClient(http: http)

@@ -31,6 +31,7 @@ public sealed class DeadairSdk : IDisposable
         Clock = new ClockClient(Http);
         Director = new DirectorClient(Http);
         History = new HistoryClient(Http);
+        Messaging = new MessagingClient(Http);
         Narrations = new NarrationsClient(Http);
         News = new NewsClient(Http);
         Nowplaying = new NowplayingClient(Http);
@@ -44,6 +45,7 @@ public sealed class DeadairSdk : IDisposable
         Podcasts = new PodcastsClient(Http);
         Productions = new ProductionsClient(Http);
         Render = new RenderClient(Http);
+        Requests = new RequestsClient(Http);
         Schedule = new ScheduleClient(Http);
         Settings = new SettingsClient(Http);
         Logs = new LogsClient(Http);
@@ -80,6 +82,8 @@ public sealed class DeadairSdk : IDisposable
 
     public HistoryClient History { get; }
 
+    public MessagingClient Messaging { get; }
+
     public NarrationsClient Narrations { get; }
 
     public NewsClient News { get; }
@@ -105,6 +109,8 @@ public sealed class DeadairSdk : IDisposable
     public ProductionsClient Productions { get; }
 
     public RenderClient Render { get; }
+
+    public RequestsClient Requests { get; }
 
     public ScheduleClient Schedule { get; }
 

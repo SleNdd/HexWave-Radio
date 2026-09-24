@@ -19,6 +19,14 @@ export const queryKeys = {
         /** The identity providers the sign-in page offers. Public: asked before anybody is signed in. */
         providers: () => ['auth', 'providers'] as const,
     },
+    /** Listener requests, for the operator deciding on them. Granting or declining one answers in terms of the whole list again. */
+    requests: {
+        list: () => ['requests', 'list'] as const,
+    },
+    /** Chat accounts linked to the signed-in account, so they can run operator commands from a chat. */
+    messaging: {
+        links: () => ['messaging', 'links'] as const,
+    },
     /** The station as an OAuth authorization server: a pending approval, and the apps it knows. */
     oauth: {
         /** One app's authorization request, keyed on the query string it arrived with. */

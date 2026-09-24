@@ -66,6 +66,9 @@ importers:
       '@maroonedsoftware/cache':
         specifier: ^0.5.0
         version: 0.5.0(ioredis@6.0.0)
+      '@maroonedsoftware/comms':
+        specifier: ^0.2.11
+        version: 0.2.11
       '@maroonedsoftware/encryption':
         specifier: ^0.5.13
         version: 0.5.13
@@ -752,6 +755,28 @@ importers:
       '@spotify/web-api-ts-sdk':
         specifier: ^1.2.0
         version: 1.2.0
+    devDependencies:
+      '@deadair/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@repo/config-eslint':
+        specifier: workspace:*
+        version: link:../../packages/config-eslint
+      '@repo/config-typescript':
+        specifier: workspace:*
+        version: link:../../packages/config-typescript
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@26.1.2)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(sugarss@5.0.1(postcss@8.5.25))(terser@5.51.2)(yaml@2.9.0))
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
+
+  plugins/telegram:
+    dependencies:
+      '@maroonedsoftware/telegram':
+        specifier: ^2.1.0
+        version: 2.1.0(@maroonedsoftware/cache@0.5.0(ioredis@6.0.0))(@maroonedsoftware/comms@0.2.11)
     devDependencies:
       '@deadair/plugin-sdk':
         specifier: workspace:*
@@ -3042,6 +3067,10 @@ packages:
       ioredis:
         optional: true
 
+  '@maroonedsoftware/comms@0.2.11':
+    resolution: {integrity: sha512-CpS21jH3+2IAcQkF1E6pAtEnmEyrjH/3ENtDEruTr/7FpwmmEv3cQcxk2hNADERFRRuWOPR0ESAtU8iqXbuF/g==}
+    engines: {node: '>=22'}
+
   '@maroonedsoftware/encryption@0.5.13':
     resolution: {integrity: sha512-8UqZcYUOSNCeFptHH8OxtTFYdYZklUg7jyq5D338V25zRQF0T5Gqk42Fd6bTQHAbKiDLM3u8AAI52IujJsyt0g==}
     engines: {node: '>=22'}
@@ -3129,6 +3158,18 @@ packages:
       '@maroonedsoftware/logger': 1.1.9
     peerDependenciesMeta:
       '@maroonedsoftware/logger':
+        optional: true
+
+  '@maroonedsoftware/telegram@2.1.0':
+    resolution: {integrity: sha512-LG6c/7yFi0QN6Js4tcy3dQVauz03+/fQtJsBCzD3ZtAOgDJ3quTHalc0WT/6CsqMbyfo112S6kGECtXLDHZBLw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@maroonedsoftware/cache': 0.5.0
+      '@maroonedsoftware/comms': 0.2.11
+    peerDependenciesMeta:
+      '@maroonedsoftware/cache':
+        optional: true
+      '@maroonedsoftware/comms':
         optional: true
 
   '@maroonedsoftware/utilities@1.11.5':
@@ -13494,6 +13535,12 @@ snapshots:
     optionalDependencies:
       ioredis: 6.0.0
 
+  '@maroonedsoftware/comms@0.2.11':
+    dependencies:
+      '@maroonedsoftware/errors': 1.9.1
+      '@maroonedsoftware/logger': 1.1.9
+      injectkit: 1.7.1
+
   '@maroonedsoftware/encryption@0.5.13':
     dependencies:
       '@maroonedsoftware/errors': 1.9.1
@@ -13624,6 +13671,16 @@ snapshots:
       luxon: 3.7.2
     optionalDependencies:
       '@maroonedsoftware/logger': 1.1.9
+
+  '@maroonedsoftware/telegram@2.1.0(@maroonedsoftware/cache@0.5.0(ioredis@6.0.0))(@maroonedsoftware/comms@0.2.11)':
+    dependencies:
+      '@maroonedsoftware/errors': 1.9.1
+      '@maroonedsoftware/logger': 1.1.9
+      '@maroonedsoftware/policies': 0.6.9
+      injectkit: 1.7.1
+    optionalDependencies:
+      '@maroonedsoftware/cache': 0.5.0(ioredis@6.0.0)
+      '@maroonedsoftware/comms': 0.2.11
 
   '@maroonedsoftware/utilities@1.11.5': {}
 
