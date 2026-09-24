@@ -22,6 +22,23 @@ operation. Set `RADIO_STATION_NAME` and
 `RADIO_JINGLE_EVERY_MINUTES` to control the fixed station ident. Keep the file mode at `0600` on
 Ubuntu and do not paste it into issue reports.
 
+## Private live-audio URL
+
+`RADIO_HTTP_STREAM_ENABLED=true` adds `GET /live.mp3` to the existing health
+listener. Compose binds port 9380 to **host loopback only**, so
+`http://127.0.0.1:9380/live.mp3` is usable on the server but is not a public
+Internet URL. A player connecting in mid-song receives the current live moment;
+it does not restart the track. One MP3 encoder serves up to 16 clients. The
+HTTP output must never govern the station clock: disconnecting every browser
+does not stop the Discord or internal programme. A direct Node run defaults
+this setting to `false` and binds the listener to `127.0.0.1`. Compose sets
+`RADIO_HEALTH_BIND_HOST=0.0.0.0` only inside its private network, while its
+host port mapping stays on loopback. Do not change that mapping to `0.0.0.0`:
+the endpoint has no built-in authentication. For remote private integrations,
+put an authenticated HTTPS reverse proxy or private VPN in front of the
+loopback endpoint. Public distribution needs a separate music-rights and
+capacity review.
+
 Start with Docker Compose and wait for the application healthcheck before using commands.
 On Docker Desktop for Windows, add `-f deploy/discord-radio/docker-compose.windows.yml`
 to every Compose command. This keeps SQLite and its WAL on one Linux named volume;

@@ -42,6 +42,8 @@ export interface RadioConfig {
     stationName: string;
     jingleEveryMinutes: number;
     healthPort: number;
+    healthBindHost: string;
+    httpStreamEnabled: boolean;
     policy: {
         requestCooldownMs: number;
         requestTtlMs: number;
@@ -66,6 +68,14 @@ const integer = (env: NodeJS.ProcessEnv, key: string, fallback: number, minimum 
     const value = Number(raw);
     if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`${key} must be an integer >= ${minimum}`);
     return value;
+};
+
+const boolean = (env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean => {
+    const raw = env[key]?.trim().toLowerCase();
+    if (!raw) return fallback;
+    if (raw === 'true' || raw === '1') return true;
+    if (raw === 'false' || raw === '0') return false;
+    throw new Error(`${key} must be true or false`);
 };
 
 const httpUrl = (env: NodeJS.ProcessEnv, key: string): string | undefined => {
@@ -106,6 +116,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RadioConfig {
 
     const maxGuilds = integer(env, 'RADIO_MAX_GUILDS', 3);
     if (maxGuilds > 3) throw new Error('RADIO_MAX_GUILDS cannot exceed 3 in this release');
+    const healthBindHost = env.RADIO_HEALTH_BIND_HOST?.trim() || '127.0.0.1';
+    if (healthBindHost !== '127.0.0.1' && healthBindHost !== '0.0.0.0') {
+        throw new Error('RADIO_HEALTH_BIND_HOST must be 127.0.0.1 or 0.0.0.0');
+    }
 
     return {
         discord: {
@@ -156,6 +170,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RadioConfig {
         stationName: (env.RADIO_STATION_NAME?.trim() || 'HexWave Radio').slice(0, 60),
         jingleEveryMinutes: integer(env, 'RADIO_JINGLE_EVERY_MINUTES', 30, 0),
         healthPort: integer(env, 'RADIO_HEALTH_PORT', 9380),
+        healthBindHost,
+        httpStreamEnabled: boolean(env, 'RADIO_HTTP_STREAM_ENABLED', false),
         policy: {
             requestCooldownMs: integer(env, 'REQUEST_COOLDOWN_MINUTES', 15) * 60_000,
             requestTtlMs: integer(env, 'REQUEST_TTL_MINUTES', 120) * 60_000,

@@ -58,6 +58,8 @@
    Для Docker Desktop на Windows добавьте `-f deploy/discord-radio/docker-compose.windows.yml` к обеим командам: SQLite и WAL будут храниться в томе Docker.
 4. Проверьте `http://127.0.0.1:9380/health`, затем `/radio status` и `/radio health` в тестовом сервере. В голосовом канале выполните `/radio join` и **послушайте** эфир: ответ health-сервера сам по себе не подтверждает звук.
 
+Локальная ссылка на текущий эфир: `http://127.0.0.1:9380/live.mp3` (если включён `RADIO_HTTP_STREAM_ENABLED`). В Compose она доступна только на самом сервере. Для удалённых личных интеграций нужен свой HTTPS-прокси с авторизацией или VPN; открывать этот незащищённый порт в интернет нельзя.
+
 Для работы с исходниками нужны Node.js 26+ и pnpm. Проверки: `pnpm --filter @hexwave/radio test`, `typecheck`, `build`. Эксплуатационные подробности, резервное копирование и восстановление — в [runbook](docs/operations/runbook.md).
 
 ## Происхождение и права

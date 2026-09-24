@@ -7,6 +7,7 @@ import { DiscordRadioBot } from './discord-bot.js';
 import { DiscordOutputFanout } from './discord-fanout.js';
 import { DisabledSpeechEngine, FallbackScriptWriter, HostPresenter, HttpSpeechEngine, OpenAiScriptWriter, TemplateScriptWriter } from './host.js';
 import { startHealthServer } from './health-server.js';
+import { LiveMp3Stream } from './live-stream.js';
 import { MediaCache } from './media-cache.js';
 import { SpotifyProvider, YtMusicProvider } from './providers.js';
 import { RadioStore } from './storage.js';
@@ -21,7 +22,8 @@ async function main(): Promise<void> {
         ...(config.spotify ? [new SpotifyProvider(config.spotify.clientId, config.spotify.clientSecret, config.spotify.shimBaseUrl, config.spotify.bridgeSecret)] : []),
         ...(config.ytmusic ? [new YtMusicProvider(config.ytmusic.resolverBaseUrl)] : []),
     ];
-    const output = new DiscordOutputFanout(config.discord.maxGuilds);
+    const liveStream = config.httpStreamEnabled ? new LiveMp3Stream() : undefined;
+    const output = new DiscordOutputFanout(config.discord.maxGuilds, liveStream);
     const speech = config.tts
         ? new HttpSpeechEngine(config.tts.baseUrl, config.tts.token, config.tts.timeoutMs)
         : new DisabledSpeechEngine();
@@ -48,7 +50,7 @@ async function main(): Promise<void> {
     director.setRequestFailureNotifier(async (recipient, message) => await bot.notifyRequestFailure(recipient, message));
     director.setHostNotificationSender(async (recipient, message) => await bot.notifyHostDecision(recipient, message));
     let shuttingDown = false;
-    const startup = startRadioRuntime({ bot, director, store, listen: () => startHealthServer(director, config.healthPort) });
+    const startup = startRadioRuntime({ bot, director, store, listen: () => startHealthServer(director, config.healthPort, liveStream, config.healthBindHost) });
     const shutdown = async (signal: string): Promise<void> => {
         if (shuttingDown) return;
         shuttingDown = true;

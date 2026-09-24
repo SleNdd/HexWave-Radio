@@ -36,6 +36,11 @@ describe('configuration and boundaries', () => {
         expect(loadConfig(base).discord.maxGuilds).toBe(3);
         expect(loadConfig(base).policy.requestCooldownMs).toBe(15 * 60_000);
         expect(loadConfig(base).jingleEveryMinutes).toBe(30);
+        expect(loadConfig(base)).toMatchObject({ httpStreamEnabled: false, healthBindHost: '127.0.0.1' });
+        expect(loadConfig({ ...base, RADIO_HTTP_STREAM_ENABLED: 'true', RADIO_HEALTH_BIND_HOST: '0.0.0.0' }))
+            .toMatchObject({ httpStreamEnabled: true, healthBindHost: '0.0.0.0' });
+        expect(() => loadConfig({ ...base, RADIO_HTTP_STREAM_ENABLED: 'yes' })).toThrow(/RADIO_HTTP_STREAM_ENABLED/);
+        expect(() => loadConfig({ ...base, RADIO_HEALTH_BIND_HOST: '::' })).toThrow(/RADIO_HEALTH_BIND_HOST/);
         expect(loadConfig({ ...base, TTS_BASE_URL: 'http://localhost:8092' }).tts?.voice).toBe('mikhail');
         expect(loadConfig({ ...base, TTS_BASE_URL: 'http://localhost:8092' }).tts?.cacheMaxBytes).toBe(256 * 1024 * 1024);
         expect(() => loadConfig({ ...base, TTS_BASE_URL: 'http://localhost:8092', TTS_CACHE_MAX_MB: '0' })).toThrow(/TTS_CACHE_MAX_MB/);

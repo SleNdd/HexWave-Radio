@@ -1,9 +1,14 @@
 import { createServer, type Server } from 'node:http';
 
 import type { RadioDirector } from './director.js';
+import type { LiveMp3Stream } from './live-stream.js';
 
-export async function startHealthServer(director: RadioDirector, port: number): Promise<Server> {
+export async function startHealthServer(director: RadioDirector, port: number, liveStream?: LiveMp3Stream, bindHost = '127.0.0.1'): Promise<Server> {
     const server = createServer((request, response) => {
+        if (request.url === '/live.mp3' && liveStream) {
+            liveStream.attach(request, response);
+            return;
+        }
         if (request.method !== 'GET' || request.url !== '/health') {
             response.writeHead(404).end();
             return;
@@ -27,7 +32,7 @@ export async function startHealthServer(director: RadioDirector, port: number): 
     await new Promise<void>((resolve, reject) => {
         const failed = (error: Error): void => reject(error);
         server.once('error', failed);
-        server.listen(port, '0.0.0.0', () => {
+        server.listen(port, bindHost, () => {
             server.off('error', failed);
             resolve();
         });

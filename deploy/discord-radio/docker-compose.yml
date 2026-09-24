@@ -19,6 +19,8 @@ services:
       RADIO_DB_PATH: /app/var/data/discord-radio.sqlite
       RADIO_CACHE_DIR: /app/var/cache/media
       RADIO_HEALTH_PORT: 9380
+      RADIO_HEALTH_BIND_HOST: 0.0.0.0
+      RADIO_HTTP_STREAM_ENABLED: ${RADIO_HTTP_STREAM_ENABLED:-true}
       YTAUDIO_BASE_URL: http://ytaudio:9322
     volumes:
       - ../../var/data:/app/var/data

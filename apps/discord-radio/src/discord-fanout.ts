@@ -13,6 +13,7 @@ import {
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { OutputFanout, OutputHealth } from './contracts.js';
+import type { LiveMp3Stream } from './live-stream.js';
 
 export class DiscordOutputFanout implements OutputFanout {
     // The station clock is this player, not the set of Discord subscribers.
@@ -25,7 +26,7 @@ export class DiscordOutputFanout implements OutputFanout {
     private active?: { reject: (error: Error) => void };
     private skipped = false;
 
-    constructor(private readonly maxGuilds = 3) {}
+    constructor(private readonly maxGuilds = 3, private readonly liveStream?: LiveMp3Stream) {}
 
     async connectGuild(guildId: string, channelId: string, adapterCreator: unknown): Promise<void> {
         if (!this.desired.has(guildId) && this.desired.size >= this.maxGuilds) throw new Error(`This release supports at most ${this.maxGuilds} guilds`);
@@ -115,6 +116,7 @@ export class DiscordOutputFanout implements OutputFanout {
                 this.player.off(AudioPlayerStatus.Idle, idle);
                 this.player.off('error', failed);
                 this.active = undefined;
+                this.liveStream?.stop();
             };
             const idle = (): void => {
                 const wasSkipped = this.skipped;
@@ -129,20 +131,26 @@ export class DiscordOutputFanout implements OutputFanout {
             this.player.once(AudioPlayerStatus.Idle, idle);
             this.player.once('error', failed);
             this.player.play(resource);
+            this.liveStream?.start(localPath, options?.kind === 'speech' ? 'speech' : 'music');
         });
     }
 
     pause(): boolean {
-        return this.player.pause(true);
+        const paused = this.player.pause(true);
+        if (paused) this.liveStream?.pause();
+        return paused;
     }
 
     resume(): boolean {
-        return this.player.unpause();
+        const resumed = this.player.unpause();
+        if (resumed) this.liveStream?.resume();
+        return resumed;
     }
 
     skip(): boolean {
         if (!this.active) return false;
         this.skipped = true;
+        this.liveStream?.stop();
         return this.player.stop(true);
     }
 
@@ -156,6 +164,7 @@ export class DiscordOutputFanout implements OutputFanout {
 
     stopAll(): void {
         if (this.active) this.active.reject(new Error('Audio output stopped'));
+        this.liveStream?.close();
         this.player.stop(true);
         for (const connection of this.connections.values()) connection.destroy();
         this.connections.clear();

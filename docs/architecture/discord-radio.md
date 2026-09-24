@@ -12,7 +12,7 @@ Discord commands -> RadioDirector -> SQLite running order
                                    |
                          shared station clock / AudioPlayer
                               /               \
-                    0..3 VoiceConnections    planned HTTP live stream
+                    0..3 VoiceConnections    one private MP3 encoder -> HTTP clients
 ```
 
 The compact app intentionally does not depend on private `apps/api` modules, Postgres,
@@ -118,9 +118,14 @@ Three uninterrupted empty minutes disconnect only that guild output. Joining and
 leaving one output does not pause, duplicate, or restart the shared running order.
 `NoSubscriberBehavior.Play` drains the single player at real-time pace even when
 there are no voice connections. A late Discord subscription joins the current
-audio resource instead of starting a new item. The planned HTTP stream must tap
-this same programme at the output boundary; it must not own a separate queue or
-block the director on slow network clients.
+audio resource instead of starting a new item. The optional `/live.mp3` output
+starts one real-time MP3 encoder per on-air item at that same output boundary.
+HTTP subscribers receive its current bytes, not a new queue or replay from the
+start; the encoder keeps running when no HTTP clients are present. Each client
+has a bounded Node response buffer; backpressure disconnects only that client.
+Encoder failure is isolated from the director and Discord output. The stream
+may have a short discontinuity between independently encoded items; a seamless
+continuous mux remains a future quality target.
 Runtime starts the director and health listener independently of Discord REST
 registration/login. A failed Discord startup retries in the background (401 is
 reported as a configuration failure); it cannot prevent the station clock from
