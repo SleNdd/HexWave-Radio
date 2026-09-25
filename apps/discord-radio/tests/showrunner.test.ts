@@ -123,6 +123,70 @@ describe('showrunner', () => {
         store.close();
     });
 
+    it.each([
+        { reply: '', finishReason: 'length', detail: 'truncated' },
+        { reply: '', finishReason: 'stop', detail: 'empty' },
+        { reply: '{"theme":"private listener data', finishReason: 'stop', detail: 'json_parse' },
+        { reply: '[]', finishReason: 'stop', detail: 'format' },
+        { reply: '{"theme":"x","queries":[],"requestRun":"alternate"}', finishReason: 'stop', detail: 'theme_short' },
+        { reply: JSON.stringify({ theme: 'Ночная музыка', queries: Array.from({ length: 8 }, (_, index) => `genre ${index}`),
+            requestRun: 'alternate' }), finishReason: 'stop', detail: 'artist_title_format' },
+        { reply: '', finishReason: 'private listener data', detail: 'empty' },
+    ])('categorizes DeepSeek plan failure as $detail without logging output', async ({ reply, finishReason, detail }) => {
+        const store = new RadioStore(':memory:', policy);
+        const valid = JSON.stringify({ theme: 'Ночная музыка',
+            queries: Array.from({ length: 8 }, (_, index) => `Artist ${index} — Song ${index}`),
+            requestRun: 'alternate' });
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: reply },
+                finish_reason: finishReason }] }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: valid },
+                finish_reason: 'stop' }] }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', baseUrl: 'https://tooken.club/v1', apiFormat: 'chat',
+            model: 'gpt-6-luna', timeoutMs: 45_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        try {
+            await expect(writer.proposeShowPlan({ hostId: 'deepseek', recentPlayed: [] })).resolves.toMatchObject({ theme: 'Ночная музыка' });
+            const sent = fetchMock.mock.calls.map((call: [string, RequestInit]) => JSON.parse(String(call[1].body)) as {
+                model: string; max_completion_tokens: number;
+            });
+            expect(sent.map(body => [body.model, body.max_completion_tokens])).toEqual([
+                ['deepseek-v4-pro', 1_800], ['gpt-6-luna', 750],
+            ]);
+            expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'show.plan.host_model_fallback',
+                hostId: 'deepseek', reason: 'invalid_plan', detail,
+                ...(/^(?:length|stop)$/u.test(finishReason) ? { finish_reason: finishReason } : {}) }));
+            expect(JSON.stringify(warning.mock.calls)).not.toContain('private listener data');
+        } finally {
+            store.close();
+        }
+    });
+
+    it('normalizes a Responses API output cap without exposing its response body', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const valid = JSON.stringify({ theme: 'Ночная музыка',
+            queries: Array.from({ length: 8 }, (_, index) => `Artist ${index} — Song ${index}`),
+            requestRun: 'alternate' });
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({ output_text: '',
+                incomplete_details: { reason: 'max_output_tokens' }, private_text: 'private listener data' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ output_text: valid }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', model: 'gpt-6-luna',
+            timeoutMs: 45_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        try {
+            await expect(writer.proposeShowPlan({ hostId: 'deepseek', recentPlayed: [] })).resolves.toMatchObject({ theme: 'Ночная музыка' });
+            expect(warning).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'show.plan.host_model_fallback',
+                hostId: 'deepseek', reason: 'invalid_plan', detail: 'truncated', finish_reason: 'length' }));
+            expect(JSON.stringify(warning.mock.calls)).not.toContain('private listener data');
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        } finally {
+            store.close();
+        }
+    });
+
     it('does not retry a shared authentication failure through Luna', async () => {
         const store = new RadioStore(':memory:', policy);
         const fetchMock = vi.fn(async () => new Response('', { status: 401 }));

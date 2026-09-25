@@ -27,6 +27,8 @@ export interface MusicProvider {
 export interface BreakContext {
     kind: 'station' | 'request' | 'studio' | 'jingle' | 'intro';
     hostId?: HostId;
+    previousHost?: { id: HostId; name: string };
+    nextHost?: { id: HostId; name: string };
     /** Playing during preparation; it will have ended when this break airs. */
     precedingTrack?: Track;
     nextTrack?: Track;
@@ -37,6 +39,23 @@ export interface BreakContext {
     memory?: ShowMemory;
     currentTheme?: string;
     recentPlayed?: RecentSpin[];
+    joint?: {
+        occasion: string;
+        participants: HostId[];
+        turnIndex: number;
+        priorTurns: Array<{ hostId: HostId; text: string }>;
+    };
+}
+
+export interface JointShowProposal {
+    hostIds: HostId[];
+    occasion: string;
+}
+
+export interface JointShowPlanner {
+    proposeJointShow(context: { currentHostId: HostId; recentShowSizes: { solo: number; pair: number; trio: number };
+        currentTheme?: string; nextTrack?: Track; memory?: ShowMemory },
+        signal?: AbortSignal): Promise<JointShowProposal>;
 }
 
 export interface ScriptWriter {

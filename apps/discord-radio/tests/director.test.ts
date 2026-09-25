@@ -219,7 +219,7 @@ describe('RadioDirector requests', () => {
         store.close();
     });
 
-    it('replaces a successful old-host ready tail with one bridge and new-host music', () => {
+    it('keeps one continuity bridge for a regular programme pivot', () => {
         const store = new RadioStore(':memory:', policy);
         const now = 10_000_000;
         const fallback = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
@@ -237,6 +237,85 @@ describe('RadioDirector requests', () => {
         expect(applied?.theme).toBe('Новый ведущий');
         expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-track-0', 'new-track-0', 'new-track-1']);
         expect(store.db.prepare("SELECT COUNT(*) AS count FROM play_items WHERE state='expired'").get()).toEqual({ count: 3 });
+        store.close();
+    });
+
+    it('drops the previous host ready tail only after the next host has prepared music', () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = 10_100_000;
+        const plan = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
+        const oldIds = ['old-a', 'old-b'].map((id, index) => {
+            const itemId = store.enqueueEditorial({ ...found, id, artist: `Old ${index}` }, now + index);
+            expect(store.claimPreparation()?.id).toBe(itemId);
+            expect(store.markReady(itemId, `C:/cache/${id}.media`, now)).toBe(true);
+            return itemId;
+        });
+        const proposal = { theme: 'Музыка нового ведущего', queries: ['New 0 — Song 0', 'New 1 — Song 1',
+            'New 2 — Song 2'], requestRun: 'alternate' as const };
+        expect(store.applyEditorialPlan(plan.revision, proposal, [], now + 2, false)).toBeUndefined();
+        expect(store.upcomingEditorial().map(item => item.id)).toEqual(oldIds);
+        const replacement = store.applyEditorialPlan(plan.revision, proposal, [
+            { track: { ...found, id: 'new-a', artist: 'New 0' }, localPath: 'C:/cache/new-a.media' },
+            { track: { ...found, id: 'new-b', artist: 'New 1' }, localPath: 'C:/cache/new-b.media' },
+        ], now + 3, false);
+        expect(replacement).toBeDefined();
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['new-a', 'new-b']);
+        expect(store.db.prepare("SELECT COUNT(*) AS count FROM play_items WHERE state='expired'").get()).toEqual({ count: 2 });
+        store.close();
+    });
+
+    it('does not air a prepared break from an earlier shift of the same host', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = Date.now() - 10_000;
+        const first = store.startHostShift('luna', now + 60 * 60_000, now, null)!;
+        const middle = store.startHostShift('sol', now + 61 * 60_000, now + 1, first.id)!;
+        const current = store.startHostShift('luna', now + 62 * 60_000, now + 2, middle.id)!;
+        const plan = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
+        const itemId = store.enqueueEditorial(found, now + 3);
+        expect(store.claimPreparation()?.id).toBe(itemId);
+        expect(store.markReady(itemId, 'C:/cache/music.media')).toBe(true);
+        const segmentId = store.recordHostSegment(itemId, 'Старая подводка.', 'C:/cache/stale.audio', now,
+            { hostId: 'luna', shiftId: first.id })!;
+        const heard: string[] = [];
+        const output = { play: async (path: string) => { heard.push(path); }, stopAll: () => undefined,
+            health: () => [{ guildId: 'g', connected: true }] } as unknown as OutputFanout;
+        const radio = new RadioDirector(store, [], {} as MediaCache, output);
+        (radio as unknown as { readyBreaks: Map<number, unknown> }).readyBreaks.set(itemId,
+            { path: 'C:/cache/stale.audio', kind: 'station', hostId: 'luna', hostShiftId: first.id,
+                planRevision: plan.revision, segmentId });
+        await radio.tick();
+        await vi.waitFor(() => expect(heard).toContain('C:/cache/music.media'));
+        expect(heard).not.toContain('C:/cache/stale.audio');
+        expect(store.db.prepare('SELECT status FROM host_segments WHERE id=?').get(segmentId)).toEqual({ status: 'failed' });
+        expect(store.currentHostShift()?.id).toBe(current.id);
+        await radio.stop();
+        store.close();
+    });
+
+    it('airs an introduction prepared during the immediate predecessor shift', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = Date.now() - 10_000;
+        const old = store.startHostShift('sol', now + 1000, now, null)!;
+        const incoming = store.startHostShift('luna', now + 180 * 60_000, now + 1000, old.id)!;
+        const plan = store.ensureFallbackShowPlan(fallbackShowPlan(now, []), now);
+        const itemId = store.enqueueEditorial(found, now + 2000);
+        expect(store.claimPreparation()?.id).toBe(itemId);
+        expect(store.markReady(itemId, 'C:/cache/music.media')).toBe(true);
+        const segmentId = store.recordHostSegment(itemId, 'Луна заступает.', 'C:/cache/intro.audio', now + 500,
+            { hostId: 'luna' })!;
+        const heard: string[] = [];
+        const output = { play: async (path: string) => { heard.push(path); }, stopAll: () => undefined,
+            health: () => [{ guildId: 'g', connected: true }] } as unknown as OutputFanout;
+        const radio = new RadioDirector(store, [], {} as MediaCache, output);
+        (radio as unknown as { readyBreaks: Map<number, unknown> }).readyBreaks.set(itemId,
+            { path: 'C:/cache/intro.audio', kind: 'intro', hostId: 'luna', hostShiftId: old.id,
+                planRevision: plan.revision, segmentId });
+        await radio.tick();
+        await vi.waitFor(() => expect(heard).toContain('C:/cache/music.media'));
+        expect(heard[0]).toBe('C:/cache/intro.audio');
+        expect(store.currentHostShift()?.id).toBe(incoming.id);
+        expect(store.currentHostShift()?.introducedAt).toBeDefined();
+        await radio.stop();
         store.close();
     });
 
@@ -1324,6 +1403,59 @@ describe('RadioDirector requests', () => {
         const events = logs.mock.calls.map(([line]) => JSON.parse(String(line)) as { event: string; itemId: number; kind?: string; ok?: boolean });
         expect(events).toContainEqual({ level: 'info', event: 'radio.break.completed', itemId: 3, kind: 'station', ok: true });
         expect(logs.mock.calls.flat().join('')).not.toContain('C:/cache/');
+        store.close();
+    });
+
+    it('prepares an organizer-selected joint station break and attributes only aired turns', async () => {
+        const store = new RadioStore(':memory:', policy);
+        const now = Date.now();
+        const shift = store.startHostShift('luna', now + 180 * 60_000, now - 1000, null)!;
+        store.markHostIntroduced(shift.id, now);
+        const first = store.enqueueEditorial(found, now);
+        const second = store.enqueueEditorial({ ...found, id: 'bcdefghijkl', title: 'Next Song' }, now + 1);
+        for (const id of [first, second]) {
+            expect(store.claimPreparation()?.id).toBe(id);
+            expect(store.markReady(id, `C:/cache/${id}.media`)).toBe(true);
+        }
+        for (let index = 0; index < 3; index++) {
+            const segment = store.recordHostSegment(first, `Раньше ${index}`, `C:/cache/old-${index}.audio`, now - 1000)!;
+            store.markHostSegmentPlayed(segment, now - 900 + index);
+        }
+        const releases = new Map<string, () => void>();
+        const heard: string[] = [];
+        const output = { health: () => [{ guildId: 'g', connected: true }],
+            play: async (path: string) => {
+                heard.push(path);
+                await new Promise<void>(resolve => releases.set(path, resolve));
+            }, stopAll: () => undefined } as unknown as OutputFanout;
+        const turns = [
+            { hostId: 'luna' as const, modelId: 'gpt-6-luna', voiceId: 'arina', text: 'Сол, как тебе этот трек?' },
+            { hostId: 'sol' as const, modelId: 'gpt-6-sol', voiceId: 'pavel', text: 'Сносно. Продолжим джазом.' },
+        ];
+        const prepareJoint = vi.fn(async () => ({ path: 'C:/cache/joint.audio', script: turns.map(turn => turn.text).join('\n'), turns }));
+        const prepare = vi.fn(async () => ({ path: 'C:/cache/solo.audio', script: 'Одиночная речь.' }));
+        const proposeJointShow = vi.fn(async () => ({ hostIds: ['luna', 'sol'] as const, occasion: 'Спор о следующей композиции' }));
+        const radio = new RadioDirector(store, [], {} as MediaCache, output,
+            { prepare, prepareJoint } as unknown as HostPresenter, [], undefined, 0,
+            { jointPlanner: { proposeJointShow } });
+        await radio.tick();
+        await vi.waitFor(() => expect(prepareJoint).toHaveBeenCalledOnce());
+        expect(proposeJointShow).toHaveBeenCalledWith(expect.objectContaining({ currentHostId: 'luna', recentShowSizes: { solo: 3, pair: 0, trio: 0 } }),
+            expect.any(AbortSignal));
+        await vi.waitFor(() => expect(store.db.prepare("SELECT status FROM host_segments WHERE play_item_id=? AND script LIKE 'Сол,%'")
+            .get(second)).toEqual({ status: 'ready' }));
+        expect(store.showMemory().hostLines).not.toContain(turns[0].text);
+        releases.get('C:/cache/1.media')!();
+        await vi.waitFor(() => expect((radio as unknown as { playing: boolean }).playing).toBe(false));
+        await radio.tick();
+        await vi.waitFor(() => expect(heard).toContain('C:/cache/joint.audio'));
+        releases.get('C:/cache/joint.audio')!();
+        await vi.waitFor(() => expect(heard).toContain('C:/cache/2.media'));
+        expect(store.showMemory().hostTurns?.slice(0, 2).map(turn => turn.hostId)).toEqual(['sol', 'luna']);
+        expect(store.recentShowSizes()).toEqual({ solo: 3, pair: 1, trio: 0 });
+        expect(prepare).not.toHaveBeenCalled();
+        releases.get('C:/cache/2.media')!();
+        await radio.stop();
         store.close();
     });
 

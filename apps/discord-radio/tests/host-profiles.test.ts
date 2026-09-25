@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HOST_BASE, HOST_IDS, HOST_PROFILES } from '../src/host-profiles.js';
-import { OpenAiScriptWriter, TemplateScriptWriter } from '../src/host.js';
+import { FallbackScriptWriter, OpenAiScriptWriter, TemplateScriptWriter } from '../src/host.js';
 import { RadioStore } from '../src/storage.js';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -99,6 +99,42 @@ describe('host profiles', () => {
             expect(await writer.writeBreak({ kind: 'station', hostId: 'sol', recentLines: [] })).toBe('Продолжаем эфир.');
             expect(await writer.writeBreak({ kind: 'station', hostId: 'claude', recentLines: [] })).toBe('Следующий трек уже готов.');
         } finally {
+            store.close();
+        }
+    });
+
+    it('keeps malformed and overlong DeepSeek copy off air and out of logs', async () => {
+        const store = new RadioStore(':memory:', {
+            requestCooldownMs: 0, requestTtlMs: 60_000, studioCooldownMs: 0,
+            studioTtlMs: 60_000, trackCooldownMs: 0, artistCooldownMs: 0,
+        });
+        const replies = [JSON.stringify({ text: `Начинаем эфир. ${'лишний '.repeat(70)}private listener data` }),
+            '{"text":"private listener data"'];
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: replies.shift() } }] }),
+            { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const writer = new FallbackScriptWriter(new OpenAiScriptWriter({ apiKey: 'test-only',
+            baseUrl: 'https://tooken.club/v1', apiFormat: 'chat', model: 'gpt-6-luna',
+            timeoutMs: 1_000, hourlyLimit: 0, dailyLimit: 0 }, store));
+        try {
+            const first = await writer.writeBreak({ kind: 'station', hostId: 'deepseek', recentLines: [] });
+            const second = await writer.writeBreak({ kind: 'station', hostId: 'deepseek', recentLines: [first] });
+            expect(first).toBeTruthy();
+            expect(second).toBeTruthy();
+            expect(`${first} ${second}`).not.toContain('private listener data');
+            expect(warning.mock.calls).toEqual([
+                [JSON.stringify({ level: 'warn', event: 'host.script.fallback', reason: 'invalid_copy', detail: 'length' })],
+                [JSON.stringify({ level: 'warn', event: 'host.script.fallback', reason: 'invalid_copy', detail: 'structured_text' })],
+            ]);
+            expect(JSON.stringify(warning.mock.calls)).not.toContain('private listener data');
+            const firstPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+                messages: Array<{ content: string }>;
+            };
+            expect(firstPayload.messages[0]?.content).toContain('не более 55 слов и 350 символов');
+            expect(firstPayload.messages[0]?.content).toContain('до 30 слов и 200 символов');
+        } finally {
+            warning.mockRestore();
             store.close();
         }
     });

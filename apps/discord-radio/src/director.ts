@@ -1,10 +1,10 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { HostInputDecisionPlanner, HostShiftPlanner, HostShiftProposal, MusicProvider, MusicQueryInterpreter, OutputFanout, QueueItem, RadioStatus, RequestInput, ShowPlan, ShowPlanner, StudioInput, Track } from './contracts.js';
+import type { HostInputDecisionPlanner, HostShiftPlanner, HostShiftProposal, JointShowPlanner, MusicProvider, MusicQueryInterpreter, OutputFanout, QueueItem, RadioStatus, RequestInput, ShowPlan, ShowPlanner, StudioInput, Track } from './contracts.js';
 import { HOST_PROFILES } from './host-profiles.js';
-import { balanceHostShift, fallbackHostShift, validateHostShiftProposal } from './host-scheduler.js';
+import { balanceHostShift, fallbackHostShift, jointShowAllowed, validateHostShiftProposal } from './host-scheduler.js';
 import { retryableDownloadError, type MediaCache } from './media-cache.js';
-import type { HostPresenter } from './host.js';
+import type { HostPresenter, PreparedHostSegment } from './host.js';
 import { moderateStudioMessage, safeOnAirName } from './moderation.js';
 import { providerFor } from './providers.js';
 import { fallbackShowPlan } from './showrunner.js';
@@ -66,6 +66,7 @@ export class RadioDirector {
     private tracksSinceStudio = 0;
     private autofillFailures = 0;
     private autofillRetryAt = 0;
+    private jointRetryAt = 0;
     // The provider can spend up to 30 seconds resolving a music URL and up to
     // 90 seconds downloading it. The outer deadline must cover both stages.
     private readonly preparationTimeoutMs = 120_000;
@@ -104,7 +105,8 @@ export class RadioDirector {
         private readonly queryInterpreter?: MusicQueryInterpreter,
         private readonly jingleEveryMs = 0,
         private readonly runtimeOptions?: { planner?: ShowPlanner; inputDecisionPlanner?: HostInputDecisionPlanner;
-            shiftPlanner?: HostShiftPlanner; isPrivileged?: (userId: string) => boolean },
+            shiftPlanner?: HostShiftPlanner; jointPlanner?: JointShowPlanner;
+            isPrivileged?: (userId: string) => boolean },
     ) {}
 
     setRequestFailureNotifier(notifier: (recipient: { userId: string; guildId: string }, message: string) => Promise<void>): void {
@@ -339,7 +341,11 @@ export class RadioDirector {
             }
             const candidateBreak = this.readyBreaks.get(next.id);
             const planRevision = await this.mailbox.run(() => this.store.currentShowPlan()?.revision);
+            const precedingShift = hostShift ? await this.mailbox.run(() => this.store.precedingHostShift(hostShift.id)) : undefined;
+            const validHandoffIntro = candidateBreak?.kind === 'intro' && !hostShift?.introducedAt &&
+                candidateBreak.hostShiftId === precedingShift?.id;
             const preparedBreak = candidateBreak && candidateBreak.hostId === hostShift?.hostId &&
+                (candidateBreak.hostShiftId === hostShift?.id || validHandoffIntro) &&
                 (candidateBreak.kind === 'jingle' || candidateBreak.planRevision === planRevision)
                 ? candidateBreak : undefined;
             if (candidateBreak && !preparedBreak && candidateBreak.segmentId !== undefined) {
@@ -833,7 +839,8 @@ export class RadioDirector {
                             throw new Error(`Could not prepare ${minimum} new show-plan tracks`);
                         }
                         const next = this.providers.length > 0
-                            ? this.store.applyEditorialPlan(snapshot.plan.revision, proposal, staged.tracks)
+                            ? this.store.applyEditorialPlan(snapshot.plan.revision, proposal, staged.tracks,
+                                Date.now(), !shiftDue)
                             : this.store.replaceShowPlan(snapshot.plan.revision, proposal);
                         if (next) this.editorialDepthHighWater = this.store.editorialPipelineCount();
                         return next;
@@ -1063,11 +1070,14 @@ export class RadioDirector {
         const request = next.kind === 'request' ? await this.mailbox.run(() => this.store.requestContext(next.id)) : undefined;
         const studio = !request && studioTracksBeforeCurrent >= 1 ? await this.mailbox.run(() => this.store.peekStudioMessage()) : undefined;
         const jingle = !request && !studio && (await this.mailbox.run(() => this.store.jingleDue(this.jingleEveryMs)));
-        const broadcast = await this.mailbox.run(() => ({ memory: this.store.showMemory(),
-            currentTheme: this.store.currentShowPlan()?.theme, planRevision: this.store.currentShowPlan()?.revision,
-            recentPlayed: this.store.recentPlayed(8),
-            precedingTrack: precedingTrack ?? this.store.current()?.track ?? this.lastCompletedTrack,
-            hostShift: this.store.currentHostShift() }));
+        const broadcast = await this.mailbox.run(() => {
+            const hostShift = this.store.currentHostShift();
+            const plan = this.store.currentShowPlan();
+            return { memory: this.store.showMemory(), currentTheme: plan?.theme, planRevision: plan?.revision,
+                recentPlayed: this.store.recentPlayed(8),
+                precedingTrack: precedingTrack ?? this.store.current()?.track ?? this.lastCompletedTrack,
+                hostShift, previousHostShift: hostShift ? this.store.precedingHostShift(hostShift.id) : undefined };
+        });
         const shift = broadcast.hostShift;
         if (shift && !this.pendingHostShift && shift.plannedEndAt <= Date.now() + currentDurationMs) {
             // A slow organizer must not race the already-rendered handoff.
@@ -1078,24 +1088,51 @@ export class RadioDirector {
         const pending = shift && this.pendingHostShift?.expectedId === shift.id ? this.pendingHostShift.proposal : undefined;
         const prospective = shift && pending && shift.plannedEndAt <= Date.now() + currentDurationMs ? pending : undefined;
         const hostId = prospective?.hostId ?? shift?.hostId;
+        const previousHostId = prospective ? shift?.hostId : broadcast.previousHostShift?.hostId;
+        const nextHostId = prospective ? undefined : pending?.hostId !== hostId ? pending?.hostId : undefined;
+        const talkContext = { ...broadcast,
+            ...(previousHostId ? { previousHost: { id: previousHostId, name: HOST_PROFILES[previousHostId].onAirName } } : {}),
+            ...(nextHostId ? { nextHost: { id: nextHostId, name: HOST_PROFILES[nextHostId].onAirName } } : {}) };
         // The first break of a new shift is an introduction, regardless of
         // whether an older request, letter or jingle is also waiting.
         const kind = hostId && (prospective || !shift?.introducedAt) ? 'intro'
             : request ? 'request' : studio ? 'studio' : jingle ? 'jingle' : 'station';
         this.breaksInFlight.add(next.id);
         try {
-            const rendered = await this.abortable(this.presenter.prepare(
+            let rendered: PreparedHostSegment | undefined;
+            if (kind === 'station' && hostId && this.runtimeOptions?.jointPlanner &&
+                currentDurationMs >= 120_000 && Date.now() >= this.jointRetryAt) {
+                try {
+                    const recentShowSizes = await this.mailbox.run(() => this.store.recentShowSizes());
+                    const proposal = await this.withDeadline(signal => this.runtimeOptions!.jointPlanner!.proposeJointShow({
+                        currentHostId: hostId, recentShowSizes,
+                        currentTheme: broadcast.currentTheme, nextTrack: next.track, memory: broadcast.memory,
+                    }, signal), 15_000, 'Joint organizer timed out');
+                    const size = proposal.hostIds.length as 1 | 2 | 3;
+                    if (size < 1 || size > 3 || !proposal.hostIds.includes(hostId) ||
+                        new Set(proposal.hostIds).size !== size) throw new Error('Invalid joint host roster');
+                    if (size > 1 && jointShowAllowed(size, recentShowSizes)) {
+                        rendered = await this.abortable(this.presenter.prepareJoint(
+                            { kind: 'station', hostId, nextTrack: next.track, ...talkContext },
+                            proposal.hostIds, proposal.occasion, this.workAbort.signal));
+                        if (!rendered) throw new Error('Joint narration unavailable');
+                    }
+                } catch {
+                    this.jointRetryAt = Date.now() + 15 * 60_000;
+                }
+            }
+            rendered ??= await this.abortable(this.presenter.prepare(
                 kind === 'request'
                     ? { kind, hostId, requesterName: request!.userName,
-                        ...(request!.dedication ? { dedication: request!.dedication } : {}), nextTrack: next.track, ...broadcast }
+                        ...(request!.dedication ? { dedication: request!.dedication } : {}), nextTrack: next.track, ...talkContext }
                     : kind === 'studio'
                       ? { kind, hostId, studioMessage: studio!.message,
-                          requesterName: studio!.userName, nextTrack: next.track, ...broadcast }
+                          requesterName: studio!.userName, nextTrack: next.track, ...talkContext }
                     : kind === 'jingle'
                         ? { kind, hostId }
                       : kind === 'intro'
-                        ? { kind, hostId, nextTrack: next.track, ...broadcast }
-                      : { kind, hostId, nextTrack: next.track, ...broadcast },
+                        ? { kind, hostId, nextTrack: next.track, ...talkContext }
+                      : { kind, hostId, nextTrack: next.track, ...talkContext },
                 this.workAbort.signal,
             ));
             if (!rendered) return;
@@ -1105,7 +1142,8 @@ export class RadioDirector {
                     this.store.currentShowPlan()?.revision !== broadcast.planRevision ||
                     (request && JSON.stringify(this.store.requestContext(next.id)) !== JSON.stringify(request))) return;
                 const segmentId = this.store.recordHostSegment(next.id, rendered.script, rendered.path,
-                    Date.now(), hostId ? { hostId, ...(hostId === shift?.hostId ? { shiftId: shift.id } : {}) } : undefined);
+                    Date.now(), hostId ? { hostId, ...(hostId === shift?.hostId ? { shiftId: shift.id } : {}) } : undefined,
+                    rendered.turns);
                 if (segmentId !== undefined) this.readyBreaks.set(next.id,
                     { path: rendered.path, kind, segmentId, hostId, hostShiftId: shift?.id,
                         planRevision: broadcast.planRevision,

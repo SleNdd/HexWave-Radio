@@ -54,6 +54,8 @@ describe('durable host shifts', () => {
         expect(reopened.currentHostShift()).toEqual(luna);
         const sol = reopened.startHostShift('sol', 21_000, 10_000, luna!.id);
         expect(sol).toMatchObject({ id: 2, hostId: 'sol', startedAt: 10_000, plannedEndAt: 21_000 });
+        expect(reopened.precedingHostShift(sol!.id)).toMatchObject({ id: luna!.id, hostId: 'luna', endedAt: 10_000 });
+        expect(reopened.precedingHostShift(luna!.id)).toBeUndefined();
         expect(reopened.recentHostShifts(5_000)).toEqual([{ ...luna, endedAt: 10_000 }, sol]);
         expect(reopened.recentHostShifts(10_001)).toEqual([sol]);
         reopened.close();

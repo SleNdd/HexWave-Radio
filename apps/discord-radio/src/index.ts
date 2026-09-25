@@ -44,7 +44,8 @@ async function main(): Promise<void> {
         { version: SPEECH_AUDIO_VERSION, normalize: normalizeSpeech }, config.tts.cacheMaxBytes,
         () => store.protectedHostPaths()) : undefined;
     const director = new RadioDirector(store, providers, cache, output, presenter, config.rotationQueries, openAi, config.jingleEveryMinutes * 60_000,
-        { ...(openAi ? { planner: openAi, inputDecisionPlanner: openAi, shiftPlanner: openAi } : {}),
+        { ...(openAi ? { planner: openAi, inputDecisionPlanner: openAi, shiftPlanner: openAi,
+            jointPlanner: openAi } : {}),
             isPrivileged: userId => config.discord.ownerIds.has(userId) || store.isStationAdmin(userId) });
     const bot = new DiscordRadioBot(config, director, output, store, providers, speech);
     director.setRequestFailureNotifier(async (recipient, message) => await bot.notifyRequestFailure(recipient, message));

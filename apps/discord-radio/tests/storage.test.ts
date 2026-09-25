@@ -409,6 +409,34 @@ describe('RadioStore', () => {
         reopened.close();
     });
 
+    it('records joint turns atomically and remembers only turns that actually aired', () => {
+        const { store, path } = diskStore();
+        const now = Date.now();
+        const itemId = store.enqueueEditorial(track('abcdefghijk'), now);
+        const turns = [
+            { hostId: 'luna' as const, modelId: 'gpt-6-luna', voiceId: 'arina', text: 'Сол, что ставим?' },
+            { hostId: 'sol' as const, modelId: 'gpt-6-sol', voiceId: 'pavel', text: 'На этот раз — джаз.' },
+        ];
+        const aired = store.recordHostSegment(itemId, 'Сол, что ставим? На этот раз — джаз.',
+            'C:/speech/joint.wav', now, { hostId: 'luna' }, turns)!;
+        const unplayed = store.recordHostSegment(itemId, 'Это не звучало.', 'C:/speech/never.wav', now,
+            { hostId: 'luna' }, turns)!;
+        expect(store.db.prepare('SELECT host_id,model_id,voice_id,text FROM host_segment_turns WHERE segment_id=? ORDER BY ordinal')
+            .all(aired)).toEqual(turns.map(turn => ({ host_id: turn.hostId, model_id: turn.modelId,
+            voice_id: turn.voiceId, text: turn.text })));
+        expect(store.markHostSegmentPlayed(aired, now + 100)).toBe(true);
+        expect(store.recentShowSizes()).toEqual({ solo: 0, pair: 1, trio: 0 });
+        expect(store.showMemory(now + 101).hostTurns?.map(turn => [turn.hostId, turn.text]))
+            .toEqual([['sol', 'На этот раз — джаз.'], ['luna', 'Сол, что ставим?']]);
+        expect(store.showMemory(now + 101).hostLines).toEqual(['На этот раз — джаз.', 'Сол, что ставим?']);
+        store.close();
+        const reopened = new RadioStore(path, policy);
+        expect(reopened.db.prepare('SELECT status FROM host_segments WHERE id=?').get(unplayed)).toEqual({ status: 'failed' });
+        expect(reopened.recentShowSizes()).toEqual({ solo: 0, pair: 1, trio: 0 });
+        expect(reopened.showMemory(now + 101).hostLines).toEqual(['На этот раз — джаз.', 'Сол, что ставим?']);
+        reopened.close();
+    });
+
     it('ages spoken history from airtime, not from a draft prepared days earlier', () => {
         const store = new RadioStore(':memory:', policy);
         const now = Date.now();

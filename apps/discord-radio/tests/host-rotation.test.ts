@@ -137,6 +137,7 @@ describe('organizer host rotation', () => {
             await (radio as unknown as { prepareUpcomingBreak(count: number, durationMs: number): Promise<void> })
                 .prepareUpcomingBreak(0, track.durationMs);
             expect(contexts[0]?.hostId).toBe('glm');
+            expect(contexts[0]?.previousHost).toEqual({ id: 'sol', name: 'Сол' });
             const prepared = (radio as unknown as { readyBreaks: Map<number, { hostId?: string }> }).readyBreaks.get(itemId);
             expect(prepared?.hostId).toBe('glm');
             await delay(90);

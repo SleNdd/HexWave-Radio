@@ -43,3 +43,13 @@ export function balanceHostShift(
     }
     return valid;
 }
+
+// The organizer decides whether to invite colleagues. This is only a ceiling
+// on actually aired joint breaks, never a rule that forces a dialogue.
+export function jointShowAllowed(size: 1 | 2 | 3,
+    counts: { solo: number; pair: number; trio: number }): boolean {
+    if (size === 1) return true;
+    const total = counts.solo + counts.pair + counts.trio + 1;
+    return size === 2 ? counts.pair + 1 <= Math.max(1, Math.ceil(total * 0.17))
+        : counts.trio + 1 <= Math.max(1, Math.ceil(total * 0.03));
+}

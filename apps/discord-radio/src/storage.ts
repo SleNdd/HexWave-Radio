@@ -40,6 +40,13 @@ export interface HostShift {
     introducedAt?: number;
 }
 
+export interface HostSegmentTurn {
+    hostId: HostId;
+    modelId: string;
+    voiceId: string;
+    text: string;
+}
+
 // Persistence ceiling only; editorial shift lengths are chosen by the organizer.
 export const MAX_HOST_SHIFT_MS = 12 * 60 * 60_000;
 
@@ -141,6 +148,15 @@ export class RadioStore {
                 aired_at INTEGER,
                 host_id TEXT,
                 host_shift_id INTEGER REFERENCES host_shifts(id)
+            );
+            CREATE TABLE IF NOT EXISTS host_segment_turns (
+                segment_id INTEGER NOT NULL REFERENCES host_segments(id) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                host_id TEXT NOT NULL CHECK(host_id IN ('luna','sol','grok','deepseek','glm','claude')),
+                model_id TEXT NOT NULL,
+                voice_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                PRIMARY KEY(segment_id,ordinal)
             );
             CREATE TABLE IF NOT EXISTS host_shifts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -274,6 +290,15 @@ export class RadioStore {
 
     currentHostShift(): HostShift | undefined {
         const row = this.db.prepare('SELECT * FROM host_shifts WHERE ended_at IS NULL').get() as Row | undefined;
+        return row ? this.hostShiftFromRow(row) : undefined;
+    }
+
+    /** Only the immediate predecessor is valid context for an upcoming handoff intro. */
+    precedingHostShift(shiftId: number): HostShift | undefined {
+        if (!Number.isSafeInteger(shiftId) || shiftId <= 0) return undefined;
+        const row = this.db.prepare(`SELECT prior.* FROM host_shifts current
+            JOIN host_shifts prior ON prior.ended_at=current.started_at AND prior.id<current.id
+            WHERE current.id=? ORDER BY prior.id DESC LIMIT 1`).get(shiftId) as Row | undefined;
         return row ? this.hostShiftFromRow(row) : undefined;
     }
 
@@ -445,18 +470,25 @@ export class RadioStore {
                 FROM studio_messages s WHERE (s.status='aired' OR (s.status='pending' AND s.expires_at>?))
                   AND s.created_at>=? AND s.created_at<=?
             ) ORDER BY created_at DESC LIMIT 6`).all(now, now - 3 * day, now, now, now - 3 * day, now) as Row[];
-        const hostLines = this.db.prepare(`SELECT script FROM host_segments
-            WHERE status='played' AND COALESCE(aired_at,created_at)>=? AND COALESCE(aired_at,created_at)<=?
-            ORDER BY COALESCE(aired_at,created_at) DESC,id DESC LIMIT 24`).all(now - day, now) as Row[];
-        const hostTurns = this.db.prepare(`SELECT host_id,script,COALESCE(aired_at,created_at) AS aired_at FROM host_segments
-            WHERE status='played' AND host_id IS NOT NULL AND COALESCE(aired_at,created_at)>=?
-              AND COALESCE(aired_at,created_at)<=?
-            ORDER BY COALESCE(aired_at,created_at) DESC,id DESC LIMIT 24`).all(now - day, now) as Row[];
+        // Child turns preserve the actual speaker order in joint shows. Legacy
+        // single-host segments retain their old row as the spoken turn.
+        const spoken = `SELECT t.text AS script,t.host_id,s.id AS segment_id,t.ordinal,
+                COALESCE(s.aired_at,s.created_at) AS aired_at
+            FROM host_segment_turns t JOIN host_segments s ON s.id=t.segment_id WHERE s.status='played'
+            UNION ALL
+            SELECT s.script,s.host_id,s.id AS segment_id,0 AS ordinal,
+                COALESCE(s.aired_at,s.created_at) AS aired_at
+            FROM host_segments s WHERE s.status='played' AND NOT EXISTS
+                (SELECT 1 FROM host_segment_turns t WHERE t.segment_id=s.id)`;
+        const hostLines = this.db.prepare(`SELECT script FROM (${spoken}) WHERE aired_at>=? AND aired_at<=?
+            ORDER BY aired_at DESC,segment_id DESC,ordinal DESC LIMIT 24`).all(now - day, now) as Row[];
+        const hostTurns = this.db.prepare(`SELECT host_id,script,aired_at FROM (${spoken})
+            WHERE host_id IS NOT NULL AND aired_at>=? AND aired_at<=?
+            ORDER BY aired_at DESC,segment_id DESC,ordinal DESC LIMIT 24`).all(now - day, now) as Row[];
         const earlierHostLines: Array<{ text: string; createdAt: number }> = [];
         for (let offset = 1; offset <= 2; offset++) {
-            const rows = this.db.prepare(`SELECT script,COALESCE(aired_at,created_at) AS aired_at FROM host_segments
-                WHERE status='played' AND COALESCE(aired_at,created_at)>=? AND COALESCE(aired_at,created_at)<?
-                ORDER BY COALESCE(aired_at,created_at) DESC,id DESC LIMIT 3`).all(now - (offset + 1) * day, now - offset * day) as Row[];
+            const rows = this.db.prepare(`SELECT script,aired_at FROM (${spoken}) WHERE aired_at>=? AND aired_at<?
+                ORDER BY aired_at DESC,segment_id DESC,ordinal DESC LIMIT 3`).all(now - (offset + 1) * day, now - offset * day) as Row[];
             earlierHostLines.push(...rows.map(row => ({ text: asString(row.script), createdAt: asNumber(row.aired_at) })));
         }
         return {
@@ -507,12 +539,13 @@ export class RadioStore {
         });
     }
 
-    /** Commit fresh prepared music and keep at most one old ready song as a continuity bridge. */
+    /** Commit fresh prepared music. A new host can drop the old host's bridge once fresh media is ready. */
     applyEditorialPlan(
         expectedRevision: number,
         proposal: ShowPlanProposal,
         staged: Array<{ track: Track; localPath: string }>,
         now = Date.now(),
+        keepContinuityBridge = true,
     ): ShowPlan | undefined {
         const valid = validateShowProposal(proposal);
         if (staged.length < 1) return undefined;
@@ -541,8 +574,9 @@ export class RadioStore {
                 .run(revision, valid.theme, JSON.stringify(valid.queries), valid.requestRun, now, now + SHOW_PLAN_TTL_MS, expectedRevision, now);
             if (updated.changes !== 1) return undefined;
             this.db.prepare("UPDATE play_items SET state='expired',updated_at=? WHERE kind='editorial' AND state IN ('queued','preparing')").run(now);
-            const bridge = this.db.prepare("SELECT id FROM play_items WHERE kind='editorial' AND state='ready' ORDER BY created_at,id LIMIT 1")
-                .get() as Row | undefined;
+            const bridge = keepContinuityBridge ? this.db.prepare(
+                "SELECT id FROM play_items WHERE kind='editorial' AND state='ready' ORDER BY created_at,id LIMIT 1",
+            ).get() as Row | undefined : undefined;
             this.db.prepare("UPDATE play_items SET state='expired',updated_at=? WHERE kind='editorial' AND state='ready' AND id<>?")
                 .run(now, bridge ? asNumber(bridge.id) : -1);
             const insert = this.db.prepare(`INSERT INTO play_items(kind,state,provider,provider_id,local_path,created_at,updated_at)
@@ -832,13 +866,27 @@ export class RadioStore {
     }
 
     recordHostSegment(playItemId: number, script: string, localPath: string, now = Date.now(),
-        attribution?: { hostId: HostId; shiftId?: number }): number | undefined {
-        const active = this.db.prepare("SELECT 1 FROM play_items WHERE id=? AND state IN ('queued','preparing','ready')").get(playItemId);
-        if (!active) return undefined;
-        const result = this.db.prepare(
-            "INSERT INTO host_segments(play_item_id,script,local_path,status,created_at,host_id,host_shift_id) VALUES(?,?,?,'ready',?,?,?)",
-        ).run(playItemId, script, localPath, now, attribution?.hostId ?? null, attribution?.shiftId ?? null);
-        return Number(result.lastInsertRowid);
+        attribution?: { hostId: HostId; shiftId?: number }, turns?: readonly HostSegmentTurn[]): number | undefined {
+        if (turns && (turns.length < 2 || turns.length > 3 || turns.some(turn =>
+            !HOST_IDS.includes(turn.hostId) || !turn.modelId || !turn.voiceId || !turn.text))) {
+            throw new RangeError('Invalid joint host turns');
+        }
+        return this.transaction(() => {
+            const active = this.db.prepare("SELECT 1 FROM play_items WHERE id=? AND state IN ('queued','preparing','ready')").get(playItemId);
+            if (!active) return undefined;
+            const result = this.db.prepare(
+                "INSERT INTO host_segments(play_item_id,script,local_path,status,created_at,host_id,host_shift_id) VALUES(?,?,?,'ready',?,?,?)",
+            ).run(playItemId, script, localPath, now, attribution?.hostId ?? null, attribution?.shiftId ?? null);
+            const segmentId = Number(result.lastInsertRowid);
+            if (turns) {
+                const insert = this.db.prepare(`INSERT INTO host_segment_turns(segment_id,ordinal,host_id,model_id,voice_id,text)
+                    VALUES(?,?,?,?,?,?)`);
+                for (const [ordinal, turn] of turns.entries()) {
+                    insert.run(segmentId, ordinal, turn.hostId, turn.modelId, turn.voiceId, turn.text);
+                }
+            }
+            return segmentId;
+        });
     }
 
     markHostSegmentPlayed(id: number, now = Date.now(), shiftId?: number): boolean {
@@ -848,6 +896,20 @@ export class RadioStore {
 
     discardHostSegment(id: number): boolean {
         return this.db.prepare("UPDATE host_segments SET status='failed' WHERE id=? AND status='ready'").run(id).changes === 1;
+    }
+
+    recentShowSizes(limit = 100): { solo: number; pair: number; trio: number } {
+        const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+        const rows = this.db.prepare(`SELECT (SELECT COUNT(*) FROM host_segment_turns t WHERE t.segment_id=s.id) AS turns
+            FROM host_segments s WHERE s.status='played'
+            ORDER BY COALESCE(s.aired_at,s.created_at) DESC,s.id DESC LIMIT ?`).all(safeLimit) as Row[];
+        return rows.reduce<{ solo: number; pair: number; trio: number }>((counts, row) => {
+            const turns = asNumber(row.turns);
+            if (turns === 2) counts.pair++;
+            else if (turns === 3) counts.trio++;
+            else counts.solo++;
+            return counts;
+        }, { solo: 0, pair: 0, trio: 0 });
     }
 
     jingleDue(intervalMs: number, now = Date.now()): boolean {
