@@ -3,6 +3,8 @@
 </div>
 
 ---
+BETA PUBLIC BOT - https://discord.com/oauth2/authorize?client_id=1552073320273285202
+---
 
 # HexWave Radio — Autonomous AI Radio Station
 
