@@ -145,11 +145,12 @@ normal operation.
   degraded health rather than busy-looping.
 
 The ensemble maps six host profiles to six light RHVoice voices (Arina,
-Pavel, Yuriy, Evgeniy-rus, Victoria, Mikhail). All six rendered valid WAVs
-through the live bridge, but their sound and levels have not yet been accepted in
-Discord. Do not mark the ensemble TTS ready or unattended on that basis alone:
-check HTTP synthesis, ten consecutive Russian renders per chosen voice,
-restart, latency, RAM and an audible handoff in the test guild. IVONA 2 Maxim
+Pavel, Yuriy, Evgeniy-rus, Victoria, Mikhail). Each voice produced ten
+consecutive nonempty Russian WAVs through the live bridge on the Windows/Docker
+test host; the slowest short-phrase response per voice was 157–265 ms. Their
+sound and levels have not yet been accepted in Discord. Do not mark the
+ensemble TTS ready or unattended on that basis alone: check restart, target-VPS
+latency/RAM and an audible handoff in the test guild. IVONA 2 Maxim
 remains a preferred future upgrade but is not an ensemble blocker after the
 failed Wine compatibility probes. The first Piper `dmitri-medium` live sample
 was rejected as too natural; do not silently promote it as fallback.
