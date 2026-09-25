@@ -134,6 +134,27 @@ function validateHostScript(text: string, context: BreakContext): string {
     if (HOST_INTERNALS.test(text) || TARGETED_THREAT.test(text) || TARGETED_ABUSE.test(text) || LISTENER_FACT.test(text) || DISALLOWED_CONTENT.test(text)) {
         throw new Error('OpenAI break violated presenter safety rules');
     }
+    // A concrete upstream DeadAir regression: a real record can be named
+    // correctly but cued on the wrong side of the break. Only reject an
+    // unambiguous title attached to an explicit forward cue; ordinary
+    // discussion of the previous song must remain possible.
+    const precedingTitle = context.precedingTrack?.title.trim();
+    const nextTitle = context.nextTrack?.title.trim();
+    if (precedingTitle && nextTitle && precedingTitle.length >= 4 &&
+        precedingTitle.toLocaleLowerCase('ru') !== nextTitle.toLocaleLowerCase('ru')) {
+        const cue = /(?:следующ\p{L}*\s+(?:трек|песн\p{L}*|композиц\p{L}*|запис\p{L}*)|дальше\s*[—:-]|следом\s*[—:-]|сейчас\s+прозвучит)/giu;
+        const title = new RegExp(`(?<!\\p{L})${escapePattern(precedingTitle)}(?!\\p{L})`, 'iu');
+        const next = new RegExp(`(?<!\\p{L})${escapePattern(nextTitle)}(?!\\p{L})`, 'iu');
+        for (const match of text.matchAll(cue)) {
+            const afterCue = text.slice(match.index + match[0].length, match.index + match[0].length + 70);
+            const mention = title.exec(afterCue);
+            const nextMention = next.exec(afterCue);
+            if (mention && (!nextMention || mention.index < nextMention.index) &&
+                !/[.!?]/u.test(afterCue.slice(0, mention.index))) {
+                throw new Error('AI break cued the preceding track as next');
+            }
+        }
+    }
     if (context.kind === 'intro' && !text.toLocaleLowerCase('ru').includes(HOST_PROFILES[context.hostId ?? 'luna'].onAirName.toLocaleLowerCase('ru'))) {
         throw new Error('AI introduction omitted the on-air name');
     }
@@ -456,6 +477,7 @@ export class FallbackScriptWriter implements ScriptWriter {
                 ['AI introduction omitted the on-air name', 'intro_name'],
                 ['AI station break repeated an earlier listener mention', 'old_listener'],
                 ['OpenAI break invented an unsupported fact', 'unsupported_fact'],
+                ['AI break cued the preceding track as next', 'wrong_track_cue'],
                 ['AI returned invalid structured text', 'structured_text'],
             ]).get(message);
             const reason = message === 'OpenAI budget exhausted' ? 'budget'

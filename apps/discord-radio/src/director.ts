@@ -57,6 +57,7 @@ export class RadioDirector {
     private currentItemId?: number;
     private currentPlaybackStartedAt?: number;
     private currentPlaybackDurationMs?: number;
+    private lastCompletedTrack?: Track;
     private skipRequestedItemId?: number;
     private ticking = false;
     private mode: RadioStatus['mode'] = 'starting';
@@ -300,7 +301,8 @@ export class RadioDirector {
                     const broadcast = await this.mailbox.run(() => ({ memory: this.store.showMemory(),
                         currentTheme: this.store.currentShowPlan()?.theme,
                         planRevision: this.store.currentShowPlan()?.revision,
-                        recentPlayed: this.store.recentPlayed(8) }));
+                        recentPlayed: this.store.recentPlayed(8),
+                        precedingTrack: this.lastCompletedTrack }));
                     const refresh = this.abortable(this.presenter.prepare({ kind: 'request', hostId: hostShift?.hostId,
                         requesterName: currentRequest.userName,
                         ...(currentRequest.dedication ? { dedication: currentRequest.dedication } : {}), nextTrack: upcoming.track,
@@ -311,6 +313,7 @@ export class RadioDirector {
                             if (this.isStopped() || this.store.peekNextForPlayback()?.id !== upcoming.id ||
                                 this.store.currentHostShift()?.id !== hostShift?.id ||
                                 this.store.currentShowPlan()?.revision !== broadcast.planRevision ||
+                                this.lastCompletedTrack !== broadcast.precedingTrack ||
                                 JSON.stringify(this.store.requestContext(upcoming.id)) !== JSON.stringify(currentRequest)) return;
                             const segmentId = this.store.recordHostSegment(upcoming.id, rendered.script, rendered.path,
                                 Date.now(), hostShift ? { hostId: hostShift.hostId, shiftId: hostShift.id } : undefined);
@@ -466,7 +469,7 @@ export class RadioDirector {
                         if (this.currentItemId !== item.id) return;
                         const estimatedRemaining = Math.max(0, (item.track?.durationMs ?? 0) -
                             (Date.now() - playbackStartedAt) - 10_000);
-                        return this.prepareUpcomingBreak(studioTracksBeforeCurrent, estimatedRemaining);
+                        return this.prepareUpcomingBreak(studioTracksBeforeCurrent, estimatedRemaining, item.track);
                     }).catch(error => {
                         this.lastError = error instanceof Error ? error.message : 'host preparation failed';
                     });
@@ -474,11 +477,15 @@ export class RadioDirector {
                     void hostJob.then(() => this.backgroundJobs.delete(hostJob));
                     await playback;
                     await this.mailbox.run(() => this.store.finishItem(item.id));
+                    this.lastCompletedTrack = item.track;
                     logPlayout('radio.track.completed', item.id);
                     completed = true;
                     this.lastError = undefined;
                     break;
                 } catch (error) {
+                    // A failed or skipped record is not a completed predecessor for a
+                    // subsequently refreshed request intro.
+                    this.lastCompletedTrack = undefined;
                     const reason = error instanceof Error ? error.message : 'audio output failed';
                     if (reason === 'Playback skipped by owner') {
                         logPlayout('radio.track.skipped', item.id);
@@ -519,6 +526,7 @@ export class RadioDirector {
                 }
             }
         } catch (error) {
+            this.lastCompletedTrack = undefined;
             const reason = error instanceof Error ? error.message : 'audio output failed';
             await this.failAndNotify(item.id, reason);
             this.lastError = reason;
@@ -1047,7 +1055,8 @@ export class RadioDirector {
         return claimed;
     }
 
-    private async prepareUpcomingBreak(studioTracksBeforeCurrent: number, currentDurationMs: number): Promise<void> {
+    private async prepareUpcomingBreak(studioTracksBeforeCurrent: number, currentDurationMs: number,
+        precedingTrack?: Track): Promise<void> {
         if (!this.presenter) return;
         const next = await this.mailbox.run(() => this.store.peekNextForPlayback());
         if (!next?.track || this.readyBreaks.has(next.id) || this.breaksInFlight.has(next.id)) return;
@@ -1057,6 +1066,7 @@ export class RadioDirector {
         const broadcast = await this.mailbox.run(() => ({ memory: this.store.showMemory(),
             currentTheme: this.store.currentShowPlan()?.theme, planRevision: this.store.currentShowPlan()?.revision,
             recentPlayed: this.store.recentPlayed(8),
+            precedingTrack: precedingTrack ?? this.store.current()?.track ?? this.lastCompletedTrack,
             hostShift: this.store.currentHostShift() }));
         const shift = broadcast.hostShift;
         if (shift && !this.pendingHostShift && shift.plannedEndAt <= Date.now() + currentDurationMs) {

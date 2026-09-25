@@ -27,6 +27,8 @@ export interface MusicProvider {
 export interface BreakContext {
     kind: 'station' | 'request' | 'studio' | 'jingle' | 'intro';
     hostId?: HostId;
+    /** Playing during preparation; it will have ended when this break airs. */
+    precedingTrack?: Track;
     nextTrack?: Track;
     requesterName?: string;
     dedication?: string;

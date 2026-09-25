@@ -370,11 +370,13 @@ describe('RadioDirector requests', () => {
         const skip = vi.fn(() => { rejectPlayback(new Error('Playback skipped by owner')); return true; });
         const output = { health: () => [{ guildId: 'g', connected: true }], play, skip, stopAll: () => undefined } as unknown as OutputFanout;
         const radio = new RadioDirector(store, [], {} as MediaCache, output);
+        (radio as unknown as { lastCompletedTrack?: Track }).lastCompletedTrack = found;
         await radio.tick();
         expect(await radio.skip()).toBe('preparing');
         expect(skip).not.toHaveBeenCalled();
         expect(await radio.skip(true)).toBe('skipped');
         await vi.waitFor(() => expect(store.db.prepare('SELECT state FROM play_items WHERE id=?').get(id)).toEqual({ state: 'interrupted' }));
+        expect((radio as unknown as { lastCompletedTrack?: Track }).lastCompletedTrack).toBeUndefined();
         expect(store.db.prepare('SELECT COUNT(*) AS n FROM track_quarantine').get()).toEqual({ n: 0 });
         await radio.stop();
         store.close();
@@ -1301,6 +1303,10 @@ describe('RadioDirector requests', () => {
         }
         await waitFor(() => contexts.length === 2);
         expect(contexts[0]?.kind).toBe('station');
+        expect(contexts[0]?.precedingTrack?.id).toBe(ids[0]);
+        expect(contexts[0]?.nextTrack?.id).toBe(ids[1]);
+        expect(contexts[1]?.precedingTrack?.id).toBe(ids[1]);
+        expect(contexts[1]?.nextTrack?.id).toBe(ids[2]);
         await radio.tick();
         await waitFor(() => releases.has('C:/cache/station.audio'));
         releases.get('C:/cache/station.audio')!();

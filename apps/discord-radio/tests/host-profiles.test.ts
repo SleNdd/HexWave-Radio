@@ -102,4 +102,37 @@ describe('host profiles', () => {
             store.close();
         }
     });
+
+    it('rejects a forward cue for the preceding record without banning a back-announce', async () => {
+        const store = new RadioStore(':memory:', {
+            requestCooldownMs: 0, requestTtlMs: 60_000, studioCooldownMs: 0,
+            studioTtlMs: 60_000, trackCooldownMs: 0, artistCooldownMs: 0,
+        });
+        const copies = [
+            'Следующий трек — Лаид ту Рест. Держитесь.',
+            'Дальше — Лаид ту Рест. Держитесь.',
+            'Сейчас прозвучит Лаид ту Рест. Держитесь.',
+            'Только что звучал Лаид ту Рест. Следующий трек — Бетон.',
+            'Следующий трек — Бетон, а Лаид ту Рест только что звучал.',
+        ];
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ text: copies.shift() }) } }],
+        }), { status: 200 })));
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', baseUrl: 'https://tooken.club/v1',
+            apiFormat: 'chat', model: 'gpt-6-luna', timeoutMs: 1_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        const context = { kind: 'station' as const, hostId: 'luna' as const, recentLines: [],
+            precedingTrack: { provider: 'ytmusic' as const, id: 'previous123', title: 'Лаид ту Рест',
+                artist: 'Исполнитель', durationMs: 180_000 },
+            nextTrack: { provider: 'ytmusic' as const, id: 'nexttrack123', title: 'Бетон',
+                artist: 'Другой исполнитель', durationMs: 180_000 } };
+        try {
+            await expect(writer.writeBreak(context)).rejects.toThrow('cued the preceding track as next');
+            await expect(writer.writeBreak(context)).rejects.toThrow('cued the preceding track as next');
+            await expect(writer.writeBreak(context)).rejects.toThrow('cued the preceding track as next');
+            await expect(writer.writeBreak(context)).resolves.toBe('Только что звучал Лаид ту Рест. Следующий трек — Бетон.');
+            await expect(writer.writeBreak(context)).resolves.toBe('Следующий трек — Бетон, а Лаид ту Рест только что звучал.');
+        } finally {
+            store.close();
+        }
+    });
 });
