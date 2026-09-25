@@ -49,6 +49,15 @@ Only confirmed `played` rows feed its bounded recent-spin context. A determinist
 local plan may supply context when no current plan exists, but it never selects
 music. The active host proposes its own editorial searches through Tooken Club;
 fixed organizer Luna remains responsible for shifts and listener-input decisions.
+After an incoming host is pinned, Luna may make one speculative 8–10-song
+proposal using that host's music brief. Only two catalog-verified media items
+are staged ahead on the constrained VPS; they stay outside the running order
+until the shift. The director accepts them only if the shift ID, planned end,
+host and show revision still match, then commits host and music in one SQLite
+transaction. A stop, changed plan or failed staging releases the cache holds.
+If the speculative path fails, the prior AI-authored queue remains while the
+ordinary new-host plan runs. After a successful handoff the new host is asked
+to revise Luna's starting point immediately; no fixed genre reserve is used.
 If the active host's planning model times out, returns an invalid plan, or has a
 temporary upstream failure, Luna may propose a replacement using that host's
 same personality and music brief. Authentication and rate-limit failures do not

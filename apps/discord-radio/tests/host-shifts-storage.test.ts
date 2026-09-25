@@ -94,6 +94,36 @@ describe('durable host shifts', () => {
         }
     }));
 
+    it('commits an incoming shift and verified editorial music atomically', () => withDatabase(path => {
+        const store = new RadioStore(path, policy);
+        try {
+            const now = Date.now();
+            const current = store.startHostShift('sol', now + 10_000, now, null)!;
+            const plan = store.ensureFallbackShowPlan({ theme: 'Старый эфир', queries: ['one', 'two', 'three'],
+                requestRun: 'alternate' }, now);
+            const track = { provider: 'ytmusic' as const, id: 'abcdefghijk', title: 'Новая песня',
+                artist: 'Новый артист', durationMs: 180_000 };
+            const staged = [{ track, localPath: 'C:/cache/new.media' }];
+            const proposal = { theme: 'Новая смена', queries: ['Artist A — Song A', 'Artist B — Song B',
+                'Artist C — Song C'], requestRun: 'alternate' as const };
+            store.db.exec(`CREATE TRIGGER reject_prepared_music BEFORE INSERT ON play_items
+                WHEN NEW.kind='editorial' AND NEW.state='ready' BEGIN SELECT RAISE(ABORT,'test media commit failure'); END`);
+            expect(() => store.startHostShiftWithEditorialPlan('glm', now + 190_000, now + 10_001,
+                current.id, plan.revision, proposal, staged)).toThrow('test media commit failure');
+            expect(store.currentHostShift()).toEqual(current);
+            expect(store.currentShowPlan()?.revision).toBe(plan.revision);
+            expect(store.db.prepare('SELECT COUNT(*) AS count FROM play_items').get()).toEqual({ count: 0 });
+            store.db.exec('DROP TRIGGER reject_prepared_music');
+            const committed = store.startHostShiftWithEditorialPlan('glm', now + 190_000, now + 10_001,
+                current.id, plan.revision, proposal, staged);
+            expect(committed?.shift.hostId).toBe('glm');
+            expect(committed?.plan.theme).toBe('Новая смена');
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual([track.id]);
+        } finally {
+            store.close();
+        }
+    }));
+
     it('rejects unknown hosts and invalid time or CAS identifiers before mutation', () => {
         const store = new RadioStore(':memory:', policy);
         try {

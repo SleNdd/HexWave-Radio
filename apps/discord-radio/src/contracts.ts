@@ -101,6 +101,10 @@ export interface ShowPlanner {
     proposeShowPlan(context: { recentPlayed: RecentSpin[]; currentTheme: string; memory?: ShowMemory;
         upcoming?: Array<{ title: string; artist: string }>; hostId?: HostId; hostMusicBrief?: string },
         signal?: AbortSignal): Promise<ShowPlanProposal>;
+    /** Optional backstage Luna plan for a pinned incoming host; never writes the running order. */
+    proposeUpcomingShowPlan?(context: { recentPlayed: RecentSpin[]; currentTheme: string; memory?: ShowMemory;
+        upcoming: Array<{ title: string; artist: string }>; hostId: HostId; hostMusicBrief: string },
+        signal?: AbortSignal): Promise<ShowPlanProposal>;
 }
 
 export interface HostInputDecisionContext {

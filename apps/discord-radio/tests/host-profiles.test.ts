@@ -7,6 +7,36 @@ import { RadioStore } from '../src/storage.js';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('host profiles', () => {
+    it('uses Luna for an incoming host brief and rejects underspecified advance music', async () => {
+        const store = new RadioStore(':memory:', {
+            requestCooldownMs: 0, requestTtlMs: 60_000, studioCooldownMs: 0,
+            studioTtlMs: 60_000, trackCooldownMs: 0, artistCooldownMs: 0,
+        });
+        const proposal = { theme: 'Грядущий эфир', requestRun: 'alternate', queries: [
+            'First Artist — First Song', 'Second Artist — Second Song', 'Third Artist — Third Song',
+            'Fourth Artist — Fourth Song', 'Fifth Artist — Fifth Song', 'Sixth Artist — Sixth Song',
+            'Seventh Artist — Seventh Song', 'Eighth Artist — Eighth Song',
+        ] };
+        const payloads: Array<{ model: string; messages: Array<{ content: string }> }> = [];
+        vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+            payloads.push(JSON.parse(String(init.body)) as typeof payloads[number]);
+            return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(proposal) } }] }), { status: 200 });
+        }));
+        const writer = new OpenAiScriptWriter({ apiKey: 'test-only', apiFormat: 'chat', model: 'other',
+            timeoutMs: 1_000, hourlyLimit: 0, dailyLimit: 0 }, store);
+        const context = { hostId: 'glm' as const, hostMusicBrief: HOST_PROFILES.glm.musicBrief,
+            currentTheme: 'Прошлая программа', recentPlayed: [], upcoming: [] };
+        try {
+            expect(await writer.proposeUpcomingShowPlan(context)).toEqual(proposal);
+            expect(payloads[0]?.model).toBe(HOST_PROFILES.luna.model);
+            expect(payloads[0]?.messages[0]?.content).toContain(HOST_PROFILES.glm.musicBrief);
+            proposal.queries.pop();
+            await expect(writer.proposeUpcomingShowPlan(context)).rejects.toThrow('8–10 specific');
+        } finally {
+            store.close();
+        }
+    });
+
     it('routes each host to its allowlisted Tooken model while organizer stays Luna', async () => {
         const store = new RadioStore(':memory:', {
             requestCooldownMs: 0, requestTtlMs: 60_000, studioCooldownMs: 0,

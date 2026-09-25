@@ -1,13 +1,13 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { HostInputDecisionPlanner, HostShiftPlanner, HostShiftProposal, JointShowPlanner, MusicProvider, MusicQueryInterpreter, OutputFanout, QueueItem, RadioStatus, RequestInput, ShowPlan, ShowPlanner, StudioInput, Track } from './contracts.js';
+import type { HostInputDecisionPlanner, HostShiftPlanner, HostShiftProposal, JointShowPlanner, MusicProvider, MusicQueryInterpreter, OutputFanout, QueueItem, RadioStatus, RequestInput, ShowPlan, ShowPlanProposal, ShowPlanner, StudioInput, Track } from './contracts.js';
 import { HOST_PROFILES } from './host-profiles.js';
 import { balanceHostShift, fallbackHostShift, jointShowAllowed, validateHostShiftProposal } from './host-scheduler.js';
 import { retryableDownloadError, type MediaCache } from './media-cache.js';
 import type { HostPresenter, PreparedHostSegment } from './host.js';
 import { moderateStudioMessage, safeOnAirName } from './moderation.js';
 import { providerFor } from './providers.js';
-import { fallbackShowPlan } from './showrunner.js';
+import { fallbackShowPlan, validateShowProposal } from './showrunner.js';
 import type { RadioStore, RequestDecision, StudioDecision } from './storage.js';
 import { matchesMusicQuery, metadataKey, songKey } from './track-identity.js';
 
@@ -85,6 +85,12 @@ export class RadioDirector {
     private hostNotifications?: Promise<void>;
     private hostShiftPlanning?: Promise<void>;
     private pendingHostShift?: { expectedId: number; proposal: HostShiftProposal; source: 'organizer' | 'fallback' };
+    private upcomingPlanning?: Promise<void>;
+    private upcomingAbort?: AbortController;
+    private upcomingAttemptedShiftId?: number;
+    private upcomingPlan?: { expectedShiftId: number; plannedEndAt: number; hostId: HostShiftProposal['hostId'];
+        expectedRevision: number; proposal: ShowPlanProposal;
+        staged: { tracks: Array<{ track: Track; localPath: string }>; release: () => void } };
     private nextHostShiftAttemptAt = 0;
     private showPlanRetryAt = 0;
     private lastShowPlanAttemptAt = 0;
@@ -210,6 +216,7 @@ export class RadioDirector {
     async stop(): Promise<void> {
         this.running = false;
         this.workAbort.abort();
+        this.discardUpcomingPlan();
         this.output.stopAll();
         this.mode = 'stopped';
         // An in-flight tick may create playback after stop begins. Drain ticks first,
@@ -563,6 +570,7 @@ export class RadioDirector {
                 this.nextShowPlanPollAt = Date.now() + 30_000;
                 this.kickShowPlanning();
                 this.kickHostShiftPlanning();
+                this.kickUpcomingPlanning();
             }
             await this.tick().catch(error => {
                 this.lastError = error instanceof Error ? error.message : 'radio loop failed';
@@ -628,6 +636,7 @@ export class RadioDirector {
             const balanced = balanceHostShift(valid, this.recentHostAirtime(Date.now()), current.hostId);
             this.pendingHostShift = { expectedId: current.id, proposal: balanced,
                 source: balanced === valid ? 'organizer' : 'fallback' };
+            this.kickUpcomingPlanning();
         }).catch(() => {
             // The boundary uses a local fair fallback; no model call blocks music.
             this.nextHostShiftAttemptAt = Date.now() + 60_000;
@@ -639,23 +648,129 @@ export class RadioDirector {
         this.backgroundJobs.add(operation);
     }
 
+    private discardUpcomingPlan(): void {
+        this.upcomingAbort?.abort();
+        this.upcomingAbort = undefined;
+        this.upcomingPlan?.staged.release();
+        this.upcomingPlan = undefined;
+    }
+
+    private kickUpcomingPlanning(): void {
+        const pending = this.pendingHostShift;
+        const shift = this.store.currentHostShift();
+        const current = this.store.currentShowPlan();
+        const revision = current?.revision;
+        if (this.upcomingPlan && (!pending || !shift || this.upcomingPlan.expectedShiftId !== shift.id ||
+            this.upcomingPlan.plannedEndAt !== shift.plannedEndAt ||
+            this.upcomingPlan.hostId !== pending.proposal.hostId || this.upcomingPlan.expectedRevision !== revision)) {
+            this.discardUpcomingPlan();
+        }
+        if (!this.running || !pending || !shift || pending.expectedId !== shift.id ||
+            this.upcomingPlan || this.upcomingPlanning || this.upcomingAttemptedShiftId === shift.id ||
+            this.showPlanning || this.providers.length === 0 ||
+            !this.runtimeOptions?.planner?.proposeUpcomingShowPlan || !current ||
+            shift.plannedEndAt - Date.now() < 90_000 || this.store.editorialPipelineCount() <= 2) return;
+        const planner = this.runtimeOptions.planner;
+        const controller = new AbortController();
+        this.upcomingAbort = controller;
+        // One bounded speculative model/media attempt per shift. The ordinary
+        // on-air planner remains the recovery path if this attempt fails.
+        this.upcomingAttemptedShiftId = shift.id;
+        const expectedShiftId = shift.id;
+        const plannedEndAt = shift.plannedEndAt;
+        const hostId = pending.proposal.hostId;
+        const expectedRevision = current.revision;
+        const context = { hostId, hostMusicBrief: HOST_PROFILES[hostId].musicBrief,
+            currentTheme: current.theme, recentPlayed: this.store.recentPlayed(20),
+            memory: this.store.showMemory(),
+            upcoming: this.store.upcomingEditorial(8).map(item => ({ title: item.track.title, artist: item.track.artist })) };
+        const operation = this.withDeadline(signal => planner.proposeUpcomingShowPlan!(context, signal),
+            25_000, 'Upcoming show planning timed out', controller.signal).then(async proposal => {
+            const validProposal = validateShowProposal(proposal);
+            if (validProposal.queries.length < 8 || validProposal.queries.some(query => !/^\S.+\s[—–]\s\S.+$/u.test(query))) {
+                throw new Error('Upcoming show plan needs 8–10 specific artist — title searches');
+            }
+            const staged = await this.stageEditorialPlan(validProposal, false, 2, controller.signal, 2);
+            if (staged.tracks.length < 2) {
+                staged.release();
+                throw new Error('Could not prepare two upcoming-host tracks');
+            }
+            const accepted = await this.mailbox.run(() => {
+                if (!this.running || controller.signal.aborted ||
+                    this.pendingHostShift?.expectedId !== expectedShiftId ||
+                    this.pendingHostShift.proposal.hostId !== hostId ||
+                    this.store.currentHostShift()?.id !== expectedShiftId ||
+                    this.store.currentHostShift()?.plannedEndAt !== plannedEndAt ||
+                    this.store.currentShowPlan()?.revision !== expectedRevision) return false;
+                this.upcomingPlan = { expectedShiftId, plannedEndAt, hostId, expectedRevision, proposal: validProposal, staged };
+                return true;
+            });
+            if (!accepted) staged.release();
+        }).catch(error => {
+            if (!this.workAbort.signal.aborted && !controller.signal.aborted) {
+                console.warn(JSON.stringify({ level: 'warn', event: 'show.plan.upcoming_failed',
+                    reason: error instanceof Error ? error.message : 'unknown' }));
+            }
+        }).finally(() => {
+            if (this.upcomingPlanning === operation) this.upcomingPlanning = undefined;
+            if (this.upcomingAbort === controller && !this.upcomingPlan) this.upcomingAbort = undefined;
+            this.backgroundJobs.delete(operation);
+        });
+        this.upcomingPlanning = operation;
+        this.backgroundJobs.add(operation);
+    }
+
     private async rotateHostIfDue(): Promise<void> {
-        const changed = await this.mailbox.run(() => {
+        const result = await this.mailbox.run(() => {
             const now = Date.now();
             const current = this.store.currentHostShift();
-            if (!current || current.plannedEndAt > now) return false;
+            if (!current || current.plannedEndAt > now) return { changed: false, applied: undefined as ShowPlan | undefined };
             const planned = this.pendingHostShift?.expectedId === current.id ? this.pendingHostShift.proposal : undefined;
             const source = planned ? this.pendingHostShift?.source ?? 'organizer' : 'fallback';
             const next = planned ?? fallbackHostShift(this.recentHostAirtime(now), current.hostId);
-            const shifted = this.store.startHostShift(next.hostId, now + next.minutes * 60_000, now, current.id);
-            if (!shifted) return false;
+            const prepared = this.upcomingPlan;
+            let shifted;
+            let applied: ShowPlan | undefined;
+            try {
+                if (next.hostId !== current.hostId && prepared && prepared.expectedShiftId === current.id &&
+                    prepared.plannedEndAt === current.plannedEndAt && prepared.hostId === next.hostId &&
+                    prepared.expectedRevision === this.store.currentShowPlan()?.revision) {
+                    const committed = this.store.startHostShiftWithEditorialPlan(next.hostId,
+                        now + next.minutes * 60_000, now, current.id, prepared.expectedRevision,
+                        prepared.proposal, prepared.staged.tracks);
+                    shifted = committed?.shift;
+                    applied = committed?.plan;
+                }
+            } catch (error) {
+                console.warn(JSON.stringify({ level: 'warn', event: 'show.plan.upcoming_commit_failed',
+                    reason: error instanceof Error ? error.message : 'unknown' }));
+            } finally {
+                this.discardUpcomingPlan();
+            }
+            shifted ??= this.store.startHostShift(next.hostId, now + next.minutes * 60_000, now, current.id);
+            if (!shifted) return { changed: false, applied: undefined as ShowPlan | undefined };
             this.pendingHostShift = undefined;
             this.nextHostShiftAttemptAt = 0;
             console.log(JSON.stringify({ level: 'info', event: 'host.shift.started', hostId: shifted.hostId,
                 plannedEndAt: shifted.plannedEndAt, source }));
-            return shifted.id !== current.id;
+            return { changed: shifted.id !== current.id, applied };
         });
-        if (changed) this.requestShowReplan();
+        if (!result.changed) return;
+        if (!result.applied) { this.requestShowReplan(); return; }
+        this.editorialDepthHighWater = await this.mailbox.run(() => this.store.editorialPipelineCount());
+        this.lastShowPlanAttemptAt = 0;
+        this.showPlanRetryAt = 0;
+        for (const [itemId, segment] of this.readyBreaks) {
+            if (segment.kind === 'jingle' || segment.planRevision === result.applied.revision) continue;
+            this.readyBreaks.delete(itemId);
+            if (segment.segmentId !== undefined) await this.mailbox.run(() => this.store.discardHostSegment(segment.segmentId!));
+        }
+        void this.ensurePrepared().catch(error => {
+            this.lastError = error instanceof Error ? error.message : 'post-handoff refill failed';
+        });
+        // The backstage plan is only a safe starting point. Give the new host
+        // an immediate chance to replace it with its own musical direction.
+        this.requestShowReplan();
     }
 
     private async processHostDecisions(): Promise<void> {
@@ -846,6 +961,7 @@ export class RadioDirector {
                         return next;
                     });
                     if (!applied) return;
+                    this.discardUpcomingPlan();
                     if (this.replanVersion === signalVersion) this.appliedReplanVersion = signalVersion;
                     this.showPlanRetryAt = 0;
                     for (const [itemId, segment] of this.readyBreaks) {
@@ -880,6 +996,7 @@ export class RadioDirector {
                     this.showPlanRetryAt = 0;
                     this.kickShowPlanning();
                 }
+                this.kickUpcomingPlanning();
             });
             this.showPlanning = operation;
             this.backgroundJobs.add(operation);
@@ -887,7 +1004,8 @@ export class RadioDirector {
         return snapshot.plan;
     }
 
-    private async stageEditorialPlan(proposal: { queries: string[] }, urgent = false): Promise<{
+    private async stageEditorialPlan(proposal: { queries: string[] }, urgent = false, minimum = urgent ? 1 : 2,
+        externalSignal?: AbortSignal, maximum = 8): Promise<{
         tracks: Array<{ track: Track; localPath: string }>; release: () => void;
     }> {
         const staged: Array<{ track: Track; localPath: string }> = [];
@@ -900,14 +1018,17 @@ export class RadioDirector {
         const rejected = { search: 0, metadata: 0, repeat: 0, cooldown: 0, media: 0 };
         try {
           for (const query of proposal.queries) {
-            if (staged.length >= 8 || Date.now() >= deadline || this.workAbort.signal.aborted) break;
+            if (staged.length >= maximum || Date.now() >= deadline || this.workAbort.signal.aborted) break;
+            externalSignal?.throwIfAborted();
             const searches = await Promise.allSettled(this.providers.map(provider => this.withDeadline(
-                signal => provider.search(query, 5, signal), this.searchTimeoutMs, `${provider.name} search timed out`,
+                signal => provider.search(query, 5, signal), this.searchTimeoutMs, `${provider.name} search timed out`, externalSignal,
             )));
+            externalSignal?.throwIfAborted();
             rejected.search += searches.filter(result => result.status === 'rejected').length;
             const candidates = searches.flatMap(result => result.status === 'fulfilled' ? result.value : []);
             for (const track of candidates) {
                 if (Date.now() >= deadline || this.workAbort.signal.aborted) break;
+                externalSignal?.throwIfAborted();
                 if (!matchesMusicQuery(track, query)) { rejected.metadata++; continue; }
                 const identity = songKey(track);
                 const artistKey = metadataKey(track.artist);
@@ -920,7 +1041,7 @@ export class RadioDirector {
                     const path = await this.withDeadline(signal => this.cache.materialize(track,
                         providerFor(this.providers, track.provider), signal,
                         new Set([...protectedPaths, ...staged.map(item => item.localPath)])),
-                    Math.min(this.preparationTimeoutMs, Math.max(1, deadline - Date.now())), 'Show-plan media preparation timed out');
+                    Math.min(this.preparationTimeoutMs, Math.max(1, deadline - Date.now())), 'Show-plan media preparation timed out', externalSignal);
                     staged.push({ track, localPath: path });
                     releases.push(unreserve);
                     seenSongs.add(identity);
@@ -929,7 +1050,7 @@ export class RadioDirector {
                 } catch (error) {
                     unreserve();
                     rejected.media++;
-                    if (this.workAbort.signal.aborted) throw error;
+                    if (this.workAbort.signal.aborted || externalSignal?.aborted) throw error;
                     const reason = error instanceof Error ? error.message : 'media preparation failed';
                     if (this.isCandidateMediaFailure(reason)) {
                         await this.mailbox.run(() => this.store.quarantineFailedCandidate(track, reason));
@@ -939,10 +1060,11 @@ export class RadioDirector {
                     // Try another verified catalog track. The old ready run remains audible.
                 }
             }
-            if (staged.length > 0 && (urgent ||
+            if (staged.length >= (externalSignal ? minimum : 1) && (staged.length >= maximum || urgent ||
                 await this.mailbox.run(() => this.store.editorialPipelineCount() <= 2))) break;
           }
-          if (staged.length < (urgent ? 1 : 2) && !this.workAbort.signal.aborted) {
+          externalSignal?.throwIfAborted();
+          if (staged.length < minimum && !this.workAbort.signal.aborted) {
               console.warn(JSON.stringify({ level: 'warn', event: 'show.plan.staging.short', staged: staged.length,
                   queries: proposal.queries.length, rejected }));
           }
@@ -1205,9 +1327,10 @@ export class RadioDirector {
         });
     }
 
-    private async withDeadline<T>(operation: (signal: AbortSignal) => Promise<T>, timeoutMs: number, reason: string): Promise<T> {
+    private async withDeadline<T>(operation: (signal: AbortSignal) => Promise<T>, timeoutMs: number, reason: string,
+        externalSignal?: AbortSignal): Promise<T> {
         const timeout = AbortSignal.timeout(timeoutMs);
-        const signal = AbortSignal.any([timeout, this.workAbort.signal]);
+        const signal = AbortSignal.any(externalSignal ? [timeout, this.workAbort.signal, externalSignal] : [timeout, this.workAbort.signal]);
         let onAbort: () => void = () => undefined;
         const deadline = new Promise<never>((_resolve, reject) => {
             onAbort = () => reject(timeout.aborted ? new Error(reason) : signal.reason);

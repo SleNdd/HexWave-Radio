@@ -1,9 +1,9 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MediaCache } from '../src/media-cache.js';
-import type { BreakContext, OutputFanout, Track } from '../src/contracts.js';
+import type { BreakContext, MusicProvider, OutputFanout, ShowPlanProposal, Track } from '../src/contracts.js';
 import { RadioDirector } from '../src/director.js';
 import type { HostPresenter } from '../src/host.js';
 import { RadioStore } from '../src/storage.js';
@@ -19,6 +19,55 @@ const output = {
     stopAll: () => { for (const release of pendingPlays) release(); pendingPlays.clear(); },
 } as unknown as OutputFanout;
 const track: Track = { provider: 'ytmusic', id: 'abcdefghijk', title: 'Test Song', artist: 'Test Artist', durationMs: 180_000 };
+
+afterEach(() => vi.restoreAllMocks());
+
+const upcomingProposal: ShowPlanProposal = { theme: 'Грядущий эфир', requestRun: 'alternate', queries: [
+    'First Artist — First Song', 'Second Artist — Second Song', 'Third Artist — Third Song',
+    'Fourth Artist — Fourth Song', 'Fifth Artist — Fifth Song', 'Sixth Artist — Sixth Song',
+    'Seventh Artist — Seventh Song', 'Eighth Artist — Eighth Song',
+] };
+
+function upcomingFixture(options?: { upcoming?: () => Promise<ShowPlanProposal>; current?: () => Promise<ShowPlanProposal> }) {
+    const store = new RadioStore(':memory:', policy);
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const shift = store.startHostShift('sol', now + 9 * 60_000, now, null)!;
+    const fallback = store.ensureFallbackShowPlan({ theme: 'Резерв', queries: ['one', 'two', 'three'], requestRun: 'alternate' }, now);
+    store.replaceShowPlan(fallback.revision, { theme: 'Текущий AI эфир', queries: ['old one', 'old two', 'old three'], requestRun: 'alternate' }, now);
+    for (let index = 0; index < 3; index++) {
+        const id = store.enqueueEditorial({ ...track, id: `old-${index}`, title: `Old ${index}`, artist: `Old Artist ${index}` });
+        store.claimPreparation();
+        store.markReady(id, `C:/cache/old-${index}.media`);
+    }
+    const fresh = [
+        { ...track, id: 'fresh-first', title: 'First Song', artist: 'First Artist' },
+        { ...track, id: 'fresh-second', title: 'Second Song', artist: 'Second Artist' },
+    ];
+    const search = vi.fn(async (query: string) => query === upcomingProposal.queries[0] ? [fresh[0]!]
+        : query === upcomingProposal.queries[1] ? [fresh[1]!] : []);
+    const reserveReleases: Array<() => void> = [];
+    const released = vi.fn();
+    const cache = { materialize: vi.fn(async (item: Track) => `C:/cache/${item.id}.media`),
+        reserve: vi.fn(() => {
+            const release = vi.fn(() => released());
+            reserveReleases.push(release);
+            return release;
+        }) } as unknown as MediaCache;
+    const proposeShowPlan = vi.fn(options?.current ?? (async () => await new Promise<ShowPlanProposal>(() => undefined)));
+    const proposeUpcomingShowPlan = vi.fn(options?.upcoming ?? (async () => upcomingProposal));
+    const radio = new RadioDirector(store, [{ name: 'ytmusic', search } as unknown as MusicProvider], cache, output,
+        undefined, [], undefined, 0, { planner: { proposeShowPlan, proposeUpcomingShowPlan },
+            shiftPlanner: { proposeHostShift: async () => ({ hostId: 'glm', minutes: 180 }) } });
+    // Keep the test focused on plan transfer rather than unrelated playback preparation.
+    (radio as unknown as { ensurePrepared: () => Promise<void> }).ensurePrepared = async () => undefined;
+    return { radio, store, shift, cache, search, fresh, released, reserveReleases,
+        proposeShowPlan, proposeUpcomingShowPlan, advance: (ms: number) => { now += ms; },
+        begin: () => {
+            (radio as unknown as { running: boolean; kickHostShiftPlanning(): void }).running = true;
+            (radio as unknown as { kickHostShiftPlanning(): void }).kickHostShiftPlanning();
+        } };
+}
 
 describe('organizer host rotation', () => {
     it('prepares one introduction for a new shift and ordinary links afterward', async () => {
@@ -220,5 +269,116 @@ describe('organizer host rotation', () => {
             await radio.stop();
             store.close();
         }
+    });
+
+    it('holds two verified incoming tracks until the pinned shift and commits them together', async () => {
+        const fixture = upcomingFixture();
+        const { radio, store, shift, fresh, reserveReleases, proposeUpcomingShowPlan, proposeShowPlan } = fixture;
+        try {
+            fixture.begin();
+            await vi.waitFor(() => expect((radio as unknown as { upcomingPlan?: unknown }).upcomingPlan).toBeDefined());
+            expect(proposeUpcomingShowPlan).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'glm',
+                hostMusicBrief: expect.stringContaining('IDM') }), expect.any(AbortSignal));
+            expect(store.currentHostShift()?.id).toBe(shift.id);
+            expect(store.currentShowPlan()?.theme).toBe('Текущий AI эфир');
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-0', 'old-1', 'old-2']);
+            expect(reserveReleases).toHaveLength(2);
+            fixture.advance(9 * 60_000 + 1);
+            await (radio as unknown as { rotateHostIfDue(): Promise<void> }).rotateHostIfDue();
+            expect(store.currentHostShift()?.hostId).toBe('glm');
+            expect(store.currentShowPlan()?.theme).toBe(upcomingProposal.theme);
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(fresh.map(item => item.id));
+            expect(reserveReleases.every(release => vi.isMockFunction(release) &&
+                (release as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
+            // The incoming host is prompted to revise the backstage plan automatically.
+            await vi.waitFor(() => expect(proposeShowPlan).toHaveBeenCalledOnce());
+        } finally {
+            await radio.stop();
+            store.close();
+        }
+    });
+
+    it('keeps the old authored queue after an upcoming model failure until the new host plan succeeds', async () => {
+        let finishCurrent!: (proposal: ShowPlanProposal) => void;
+        const current = new Promise<ShowPlanProposal>(resolve => { finishCurrent = resolve; });
+        const fixture = upcomingFixture({ upcoming: async () => { throw new Error('model unavailable'); }, current: async () => await current });
+        const { radio, store, proposeUpcomingShowPlan, proposeShowPlan } = fixture;
+        try {
+            fixture.begin();
+            await vi.waitFor(() => expect(proposeUpcomingShowPlan).toHaveBeenCalledOnce());
+            fixture.advance(9 * 60_000 + 1);
+            await (radio as unknown as { rotateHostIfDue(): Promise<void> }).rotateHostIfDue();
+            await vi.waitFor(() => expect(proposeShowPlan).toHaveBeenCalledOnce());
+            expect(store.currentShowPlan()?.theme).toBe('Текущий AI эфир');
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-0', 'old-1', 'old-2']);
+            finishCurrent(upcomingProposal);
+            await vi.waitFor(() => expect(store.currentShowPlan()?.theme).toBe(upcomingProposal.theme));
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['fresh-first', 'fresh-second']);
+        } finally {
+            await radio.stop();
+            store.close();
+        }
+    });
+
+    it('abandons a short media preplan and releases its only reservation', async () => {
+        const fixture = upcomingFixture();
+        const { radio, store, search, fresh, reserveReleases } = fixture;
+        search.mockImplementation(async query => query === upcomingProposal.queries[0] ? [fresh[0]!] : []);
+        try {
+            fixture.begin();
+            await vi.waitFor(() => expect(reserveReleases).toHaveLength(1));
+            await vi.waitFor(() => expect((radio as unknown as { upcomingPlanning?: Promise<void> }).upcomingPlanning).toBeUndefined());
+            expect((reserveReleases[0] as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+            expect((radio as unknown as { upcomingPlan?: unknown }).upcomingPlan).toBeUndefined();
+            fixture.advance(9 * 60_000 + 1);
+            await (radio as unknown as { rotateHostIfDue(): Promise<void> }).rotateHostIfDue();
+            expect(store.currentShowPlan()?.theme).toBe('Текущий AI эфир');
+            expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-0', 'old-1', 'old-2']);
+        } finally {
+            await radio.stop();
+            store.close();
+        }
+    });
+
+    it('drops staged media when the show revision or pinned shift becomes stale', async () => {
+        for (const stale of ['revision', 'shift'] as const) {
+            const fixture = upcomingFixture();
+            const { radio, store, shift, reserveReleases } = fixture;
+            try {
+                fixture.begin();
+                await vi.waitFor(() => expect((radio as unknown as { upcomingPlan?: unknown }).upcomingPlan).toBeDefined());
+                if (stale === 'revision') {
+                    store.replaceShowPlan(store.currentShowPlan()!.revision,
+                        { theme: 'Новый текущий блок', queries: ['new one', 'new two', 'new three'], requestRun: 'alternate' });
+                    // A host-authored revision can arrive after staging and just
+                    // before handoff; the commit guard must reject it on its own.
+                    fixture.advance(9 * 60_000 + 1);
+                    await (radio as unknown as { rotateHostIfDue(): Promise<void> }).rotateHostIfDue();
+                    expect(store.currentShowPlan()?.theme).toBe('Новый текущий блок');
+                } else {
+                    store.startHostShift('claude', Date.now() + 180 * 60_000, Date.now(), shift.id);
+                    (radio as unknown as { kickUpcomingPlanning(): void }).kickUpcomingPlanning();
+                }
+                expect((radio as unknown as { upcomingPlan?: unknown }).upcomingPlan).toBeUndefined();
+                expect(reserveReleases.every(release => vi.isMockFunction(release) &&
+                    (release as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
+                expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-0', 'old-1', 'old-2']);
+            } finally {
+                await radio.stop();
+                store.close();
+            }
+        }
+    });
+
+    it('releases held upcoming media on stop without inserting it', async () => {
+        const fixture = upcomingFixture();
+        const { radio, store, reserveReleases } = fixture;
+        fixture.begin();
+        await vi.waitFor(() => expect((radio as unknown as { upcomingPlan?: unknown }).upcomingPlan).toBeDefined());
+        await radio.stop();
+        expect(reserveReleases.every(release => vi.isMockFunction(release) &&
+            (release as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
+        expect(store.upcomingEditorial().map(item => item.track.id)).toEqual(['old-0', 'old-1', 'old-2']);
+        store.close();
     });
 });

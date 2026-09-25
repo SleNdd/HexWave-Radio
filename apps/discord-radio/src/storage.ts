@@ -7,6 +7,8 @@ import { HOST_IDS, type HostId } from './host-profiles.js';
 import { SHOW_PLAN_TTL_MS, validateShowProposal } from './showrunner.js';
 import { metadataKey, songKey } from './track-identity.js';
 
+const invalidPreparedHandoff = Symbol('invalid-prepared-handoff');
+
 export interface RequestPolicy {
     requestCooldownMs: number;
     requestTtlMs: number;
@@ -329,22 +331,25 @@ export class RadioStore {
         if (expectedCurrentId !== null && (!Number.isSafeInteger(expectedCurrentId) || expectedCurrentId <= 0)) {
             throw new RangeError('Invalid expected host shift id');
         }
-        return this.transaction(() => {
-            const current = this.currentHostShift();
-            if ((current?.id ?? null) !== expectedCurrentId) return undefined;
-            if (current) {
-                if (now < current.startedAt) throw new RangeError('Host shift clock moved backward');
-                if (current.hostId === hostId) {
-                    if (current.plannedEndAt !== plannedEndAt) {
-                        this.db.prepare('UPDATE host_shifts SET planned_end_at=? WHERE id=? AND ended_at IS NULL').run(plannedEndAt, current.id);
-                    }
-                    return { ...current, plannedEndAt };
+        return this.transaction(() => this.startHostShiftWithinTransaction(hostId, plannedEndAt, now, expectedCurrentId));
+    }
+
+    private startHostShiftWithinTransaction(hostId: HostId, plannedEndAt: number, now: number,
+        expectedCurrentId: number | null): HostShift | undefined {
+        const current = this.currentHostShift();
+        if ((current?.id ?? null) !== expectedCurrentId) return undefined;
+        if (current) {
+            if (now < current.startedAt) throw new RangeError('Host shift clock moved backward');
+            if (current.hostId === hostId) {
+                if (current.plannedEndAt !== plannedEndAt) {
+                    this.db.prepare('UPDATE host_shifts SET planned_end_at=? WHERE id=? AND ended_at IS NULL').run(plannedEndAt, current.id);
                 }
-                this.db.prepare('UPDATE host_shifts SET ended_at=? WHERE id=? AND ended_at IS NULL').run(now, current.id);
+                return { ...current, plannedEndAt };
             }
-            const inserted = this.db.prepare('INSERT INTO host_shifts(host_id,started_at,planned_end_at) VALUES(?,?,?)').run(hostId, now, plannedEndAt);
-            return { id: Number(inserted.lastInsertRowid), hostId, startedAt: now, plannedEndAt };
-        });
+            this.db.prepare('UPDATE host_shifts SET ended_at=? WHERE id=? AND ended_at IS NULL').run(now, current.id);
+        }
+        const inserted = this.db.prepare('INSERT INTO host_shifts(host_id,started_at,planned_end_at) VALUES(?,?,?)').run(hostId, now, plannedEndAt);
+        return { id: Number(inserted.lastInsertRowid), hostId, startedAt: now, plannedEndAt };
     }
 
     private recoverInterrupted(): void {
@@ -549,7 +554,11 @@ export class RadioStore {
     ): ShowPlan | undefined {
         const valid = validateShowProposal(proposal);
         if (staged.length < 1) return undefined;
-        return this.transaction(() => {
+        return this.transaction(() => this.applyEditorialPlanWithinTransaction(expectedRevision, valid, staged, now, keepContinuityBridge));
+    }
+
+    private applyEditorialPlanWithinTransaction(expectedRevision: number, valid: ShowPlanProposal,
+        staged: Array<{ track: Track; localPath: string }>, now: number, keepContinuityBridge: boolean): ShowPlan | undefined {
             const plan = this.db.prepare('SELECT revision,expires_at FROM show_plan WHERE id=1').get() as Row | undefined;
             if (!plan || asNumber(plan.revision) !== expectedRevision || asNumber(plan.expires_at) <= now) return undefined;
 
@@ -589,7 +598,29 @@ export class RadioStore {
             this.db.prepare("DELETE FROM events WHERE kind='show.plan' AND created_at<?").run(now - 7 * 86_400_000);
             return { revision, theme: valid.theme, queries: [...valid.queries], source: 'model', requestRun: valid.requestRun,
                 createdAt: now, expiresAt: now + SHOW_PLAN_TTL_MS };
-        });
+    }
+
+    /** The prepared music and its incoming host become durable in one SQLite commit. */
+    startHostShiftWithEditorialPlan(hostId: HostId, plannedEndAt: number, now: number, expectedCurrentId: number,
+        expectedRevision: number, proposal: ShowPlanProposal,
+        staged: Array<{ track: Track; localPath: string }>): { shift: HostShift; plan: ShowPlan } | undefined {
+        if (!(HOST_IDS as readonly string[]).includes(hostId) || !Number.isSafeInteger(expectedCurrentId) || expectedCurrentId <= 0 ||
+            !Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(plannedEndAt) ||
+            plannedEndAt <= now || plannedEndAt - now > MAX_HOST_SHIFT_MS) throw new RangeError('Invalid prepared host shift');
+        const valid = validateShowProposal(proposal);
+        if (staged.length < 1) return undefined;
+        try {
+            return this.transaction(() => {
+                const shift = this.startHostShiftWithinTransaction(hostId, plannedEndAt, now, expectedCurrentId);
+                if (!shift || shift.id === expectedCurrentId) throw invalidPreparedHandoff;
+                const plan = this.applyEditorialPlanWithinTransaction(expectedRevision, valid, staged, now, false);
+                if (!plan) throw invalidPreparedHandoff;
+                return { shift, plan };
+            });
+        } catch (error) {
+            if (error === invalidPreparedHandoff) return undefined;
+            throw error;
+        }
     }
 
     private rowToShowPlan(row: Row): ShowPlan {
