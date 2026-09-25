@@ -58,6 +58,9 @@ once, verify the `started` and `connected` records, and verify a `finished`
 record with `completed=true`, `interrupted=false`, `connected=true`, a positive
 byte count, elapsed time at least 86,400 seconds, and the container's exit code
 0 before accepting the duration.
+Stop the observer before replacing the radio container: its shared network
+namespace belongs to the old container. A replacement needs a new observer
+run ID and a fresh, uninterrupted duration; never splice two logs together.
 The output file must be new for each run. An
 abruptly missing process with no `finished` event is an invalid run. It emits
 a heartbeat once per minute so a stale observer is visible. For a short
@@ -68,6 +71,12 @@ is logged, and five seconds without MP3 bytes triggers a reconnect. Run it
 alongside `scripts/soak-stats.ps1` and station event logs. Packet continuity
 does not prove the music sounds correct or that MP3 frames decode cleanly;
 listen to representative boundaries separately.
+Docker container uptime does not prove that a Windows host stayed awake: a
+desktop sleep freezes the radio and observer together, then both can resume
+without a container restart. A packet gap across sleep fails the soak. Check
+host power events when a gap is much longer than a song, and run release
+acceptance on an always-awake VPS rather than disabling the user's normal
+Windows power policy without a separate operational decision.
 
 Start with Docker Compose and wait for the application healthcheck before using commands.
 On Docker Desktop for Windows, add `-f deploy/discord-radio/docker-compose.windows.yml`
